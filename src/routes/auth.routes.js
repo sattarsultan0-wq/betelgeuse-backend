@@ -3,7 +3,7 @@ import { rateLimit } from 'express-rate-limit';
 import { z } from 'zod';
 import * as controller from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/auth.js';
-import { issueCsrf } from '../middleware/csrf.js';
+import { issueCsrf, checkCsrf } from '../middleware/csrf.js';
 import { validate } from '../middleware/validate.js';
 import * as oauth from '../controllers/oauth.controller.js';
 const router = Router();
@@ -27,9 +27,13 @@ const limit = rateLimit({
   limit: 20,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
-  message: { code: 'RATE_LIMIT', message: 'Слишком много попыток входа. Попробуйте позже.' },
+  message: {
+    code: 'RATE_LIMIT',
+    message: 'Слишком много попыток входа. Попробуйте позже.',
+  },
 });
 router.get('/csrf', issueCsrf);
+router.get('/csrf/check', checkCsrf);
 router.get('/providers', oauth.providers);
 router.post(
   '/oauth/:provider/start',
@@ -40,7 +44,9 @@ router.post(
 router.post(
   '/register',
   limit,
-  validate(z.object({ email, password, name: z.string().trim().min(2).max(80) }).strict()),
+  validate(
+    z.object({ email, password, name: z.string().trim().min(2).max(80) }).strict(),
+  ),
   controller.register,
 );
 router.post(

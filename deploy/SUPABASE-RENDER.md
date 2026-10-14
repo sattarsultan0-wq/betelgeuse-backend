@@ -50,7 +50,7 @@ Prisma CLI — dev dependency, поэтому она должна быть ус�
 - `CORS_ORIGINS` — точный HTTPS origin frontend, без пути; несколько origin разделяются запятыми.
 - `FRONTEND_URL=https://betelgeuse-ai.vercel.app` — разрешённый origin возврата из OAuth; подробности API и Google Cloud в [RENDER-VERCEL.md](RENDER-VERCEL.md).
 - `TRUST_PROXY=1` — для прокси Render.
-- `COOKIE_CROSS_SITE=true`, если frontend и API находятся на разных сайтах, например Vercel и `onrender.com`. Для собственных поддоменов одного сайта настройку выбирай по фактической схеме размещения.
+- `COOKIE_CROSS_SITE=false` для текущего Vercel same-origin proxy. Прямой cross-site API требует `true`, но блокировка сторонних cookies может мешать входу; см. [MOBILE-AUTH.md](MOBILE-AUTH.md).
 - Существующие серверные параметры OAuth, R2 и провайдера генерации — по нужным функциям, из `.env.example`; не передавай их в frontend.
 
 Деплой на Render в рамках этой задачи не выполнялся. Проверено подключение локального Express к Supabase, а не сетевой доступ из ещё не созданного Render-сервиса.

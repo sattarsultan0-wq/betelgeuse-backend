@@ -2,23 +2,25 @@
 
 Production frontend: **https://betelgeuse-ai.vercel.app**. Публичный URL backend пока неизвестен; в конфигурацию он не подставлялся. В этой задаче миграции и запросы к реальной базе данных не выполнялись.
 
+Мобильная авторизация использует same-origin Vercel proxy. [Диагностика CSRF, исправление и проверка браузеров](MOBILE-AUTH.md).
+
 ## Frontend
 
 Все backend-запросы проходят через `frontend/src/services/api.js`: auth, Google OAuth start, профиль, баланс, модели, генерации, polling, история, админка, тренды, загрузки и скачивания. URL приватных изображений библиотеки строится тем же `apiUrl()`.
 
-`VITE_API_URL` принимает **origin backend** либо origin с `/api`. `/api` добавляется один раз: `api('/auth/me')` и `api('/api/auth/me')` обращаются к одному `/api/auth/me`. Production принимает только абсолютный HTTPS URL, development поддерживает `/api` через Vite proxy.
+`VITE_API_URL=/api` используется и в production, и в development. `/api` добавляется один раз: `api('/auth/me')` и `api('/api/auth/me')` обращаются к одному `/api/auth/me`. Production проксирует запросы через Vercel, development — через Vite. Прямые HTTPS origins также поддерживаются, но прямой cross-site API ненадёжен для мобильной cookie-авторизации.
 
 | Файл | Назначение |
 | --- | --- |
 | `frontend/.env.development` | `VITE_API_URL=/api`, `API_PROXY_TARGET=http://127.0.0.1:4000` |
-| `frontend/.env.production` | `VITE_API_URL=` намеренно пуст до получения Render URL |
+| `frontend/.env.production` | `VITE_API_URL=/api`, Render origin задаётся отдельно в Vercel |
 | `frontend/.env.example` | Шаблон переменных и пояснения для обоих режимов |
 
 Файлы `.env.development` и `.env.production` созданы локально и исключены существующими правилами Gitignore. Для Vercel задавай значение в Dashboard, не полагайся на локальные игнорируемые файлы.
 
-В **Vercel → Settings → Environment Variables** добавь `VITE_API_URL`, равный реальному HTTPS origin Render, и сделай **Redeploy**. Для Production и Preview переменные задаются отдельно. Не разрешай произвольные preview origins на backend: добавляй конкретные доверенные HTTPS origins при необходимости. `API_PROXY_TARGET` в Vercel не нужен: он используется только development-сервером Vite.
+В **Vercel → Settings → Environment Variables** добавь `VITE_API_URL=/api` и `BACKEND_ORIGIN`, равный реальному HTTPS origin Render без path, затем сделай **Redeploy**. `vercel.ts` строит внешний rewrite из этой переменной. Для Production и Preview переменные задаются отдельно. Не разрешай произвольные preview origins на backend: добавляй конкретные доверенные HTTPS origins при необходимости. `API_PROXY_TARGET` в Vercel не нужен: он используется только development-сервером Vite.
 
-Без production URL UI собирается с явным предупреждением; API-клиент сообщает, что `VITE_API_URL` не настроен, и не делает запросы на локальный адрес или домен frontend. После получения URL также можешь заполнить `frontend/.env.production` для локальной production-сборки. Не помещай JWT, Google client secret, R2 или PostgreSQL credentials в `VITE_*`: эти переменные попадают в публичный JavaScript. [Переменные Vite](https://vite.dev/guide/env-and-mode).
+Локальная production-сборка работает с `/api`. Деплой Vercel требует реальный `BACKEND_ORIGIN` и отклоняет пустую или неверную настройку. Не помещай JWT, Google client secret, R2 или PostgreSQL credentials в `VITE_*`: эти переменные попадают в публичный JavaScript. [Переменные Vite](https://vite.dev/guide/env-and-mode).
 
 Прямая отправка фото в R2 по временным signed URLs остаётся с `credentials: 'omit'`: cookies backend нельзя отправлять в объектное хранилище. Внешние URL провайдера, R2-видео и Telegram SDK не заменяются на API origin.
 
@@ -29,12 +31,12 @@ Production frontend: **https://betelgeuse-ai.vercel.app**. Публичный UR
 | `NODE_ENV` | `production` |
 | `CORS_ORIGINS` | `https://betelgeuse-ai.vercel.app` |
 | `FRONTEND_URL` | `https://betelgeuse-ai.vercel.app` |
-| `COOKIE_CROSS_SITE` | `true` для текущей пары `vercel.app` + `onrender.com` |
+| `COOKIE_CROSS_SITE` | `false` для same-origin Vercel proxy |
 | `TRUST_PROXY` | `1` |
 | `DATABASE_URL`, `DIRECT_URL` | Уже проверенные подключения Supabase, только на backend |
 | `JWT_SECRET` | Постоянный случайный секрет минимум 32 символа |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Credentials Web Application из Google Cloud |
-| `GOOGLE_REDIRECT_URI` | Реальный HTTPS origin Render + `/api/auth/oauth/google/callback` |
+| `GOOGLE_REDIRECT_URI` | `https://betelgeuse-ai.vercel.app/api/auth/oauth/google/callback` через proxy |
 
 Существующие R2/Higgsfield/Telegram переменные переноси по используемым функциям. `PORT` предоставляет Render. Build/start, генерация Prisma Client и настройки базы описаны в [SUPABASE-RENDER.md](SUPABASE-RENDER.md); повторный деплой здесь не выполнялся.
 
@@ -46,7 +48,7 @@ Backend сохраняет `credentials: true` в CORS. Frontend отправл�
 
 Между `vercel.app` и `onrender.com` cookies являются сторонними. `SameSite=None; Secure` и правильный CORS **не обходят** ограничения Safari, Firefox, приватных режимов или пользовательской блокировки third-party cookies. Поэтому без реальных deployed URLs нельзя гарантировать вход во всех браузерах. [Ограничения credentialed CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS#third-party_cookies).
 
-Для устойчивой авторизации используй frontend и API на HTTPS-поддоменах **одного собственного домена** либо настрой отдельно same-origin proxy. В первом варианте обнови `VITE_API_URL`, `CORS_ORIGINS`, `FRONTEND_URL`, Google callback и поставь `COOKIE_CROSS_SITE=false`: HTTPS поддомены одного сайта используют `SameSite=Lax`, но всё ещё требуют CORS и `credentials: include`. Сам домен здесь не выбирался и proxy не добавлялся.
+В текущей реализации добавлен same-origin proxy: browser обращается к `/api` на Vercel, и cookies становятся собственными с `SameSite=Lax`. Собственный домен для этой схемы не требуется. Альтернатива — frontend и API на HTTPS-поддоменах одного собственного домена с `COOKIE_CROSS_SITE=false` и правильными CORS origins.
 
 ## Google Cloud Console
 
@@ -54,9 +56,9 @@ OAuth client type: **Web application**. В Authorized redirect URIs добавь
 
 - `http://127.0.0.1:5173/api/auth/oauth/google/callback` — текущий локальный Vite proxy.
 - `http://localhost:5173/api/auth/oauth/google/callback` — если используешь localhost и меняешь `GOOGLE_REDIRECT_URI` соответственно.
-- После получения Render URL: реальный HTTPS backend origin + `/api/auth/oauth/google/callback`.
+- `https://betelgeuse-ai.vercel.app/api/auth/oauth/google/callback` — production через proxy.
 
-Callback с кодом Google идёт **на backend**, затем backend возвращает браузер на `https://betelgeuse-ai.vercel.app/?auth_result=success` и frontend проверяет существующую сессию. Frontend URL не заменяет Google redirect URI. PKCE, nonce, state, проверка ID token и создание/поиск аккаунта сохранены. Redirect URI должен точно совпадать с переменной, включая path, protocol и port. [Google Web Server OAuth](https://developers.google.com/identity/protocols/oauth2/web-server).
+Callback с кодом Google идёт **через Vercel proxy на backend**, затем backend возвращает браузер на `https://betelgeuse-ai.vercel.app/?auth_result=success` и frontend проверяет существующую сессию. Callback должен проходить через тот же browser origin, где установлена HttpOnly binding cookie. PKCE, nonce, state, проверка ID token и создание/поиск аккаунта сохранены. Redirect URI должен точно совпадать с переменной, включая path, protocol и port. [Google Web Server OAuth](https://developers.google.com/identity/protocols/oauth2/web-server).
 
 Текущий server-side flow не требует JavaScript origins для Google SDK. Если настраиваешь это поле, используй `https://betelgeuse-ai.vercel.app`, `http://127.0.0.1:5173` и `http://localhost:5173`, без path. Настрой consent screen, тестовых пользователей для Testing и production publishing по готовности приложения. Google client secret хранится только на Render.
 
@@ -66,10 +68,10 @@ Callback с кодом Google идёт **на backend**, затем backend во
 
 Frontend проверки: `npm test`, `npm run build`. Backend: `npm test` без `TEST_DATABASE_URL` и с фиктивным `DATABASE_URL`, чтобы не обращаться к Supabase. `test:db` не запускался: он создаёт временную PostgreSQL и применяет миграции. Production login/CSRF/session/logout и Google OAuth start проверены через HTTP с подставными данными; настоящий вход Google и Render ↔ Vercel нужно проверить после получения домена и credentials.
 
-Результат текущей проверки: frontend — 3 теста прошли; backend — 32 прошли, 5 PostgreSQL-тестов пропущены, ошибок нет. Production build выполнен с пустым URL и отдельно с явно тестовым origin, заданным только в процессе сборки. Локальный Vite proxy для localhost и 127.0.0.1 вернул 200 на `/api/models` и `/api/auth/csrf`, 401 без сессии на `/api/auth/me`; cookies сохранили `HttpOnly; SameSite=Lax` без `Secure` для HTTP. Worker и обращения к PostgreSQL не запускались.
+После исправления mobile CSRF: frontend — 10 тестов прошли; backend — 37 прошли, 5 PostgreSQL-тестов пропущены. Production build успешен. WebKit/Chromium проверены через локальный HTTPS proxy, подробнее в [MOBILE-AUTH.md](MOBILE-AUTH.md). Worker и обращения к PostgreSQL не запускались.
 
 ## Изменённые файлы
 
-- Frontend: `src/services/api.js`, новый `src/services/api-url.js`, `src/pages/Library.jsx`, `vite.config.js`, `package.json`, `.env.example`, новые `.env.development`, `.env.production`, `tests/api.test.js`.
-- Backend: `src/config/env.js`, `src/controllers/oauth.controller.js`, `src/services/oauth.service.js`, `.env.example`, `scripts/check-supabase-app.js` (учёт нового `FRONTEND_URL`, проверка не запускалась), новый `tests/deployment.test.js`.
-- Документация: этот файл, `SUPABASE-RENDER.md`, корневой `README.md`.
+- Основная конфигурация API: frontend `src/services/api.js`, `api-url.js`, `Library.jsx`, Vite/env-файлы; backend env и OAuth-контроллер/сервис.
+- Исправление mobile CSRF: `frontend/vercel.ts`, `scripts/vercel-config.js`, API-клиент и тесты; backend `csrf.js`, `errors.js`, `auth.routes.js`, `app.js`, `tests/csrf.test.js`. `vercel.json` заменён новым config.
+- Полный список и текущие проверки: [MOBILE-AUTH.md](MOBILE-AUTH.md).

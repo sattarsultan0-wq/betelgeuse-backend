@@ -25,6 +25,15 @@ app.use((req, res, next) => {
   next();
 });
 app.use(helmet());
+// Auth responses, including early OAuth callbacks, must never enter CDN caches.
+app.use('/api', (req, res, next) => {
+  res.set({
+    'Cache-Control': 'private, no-store',
+    'CDN-Cache-Control': 'no-store',
+    'Vercel-CDN-Cache-Control': 'no-store',
+  });
+  next();
+});
 app.use(cookieParser());
 app.use('/api/auth/oauth', oauthCallbacks);
 app.use(
@@ -50,10 +59,6 @@ app.use(
 );
 app.use(express.json({ limit: '32kb' }));
 app.use('/api', csrfProtection);
-app.use('/api', (req, res, next) => {
-  res.set('Cache-Control', 'no-store');
-  next();
-});
 app.get('/api/health', async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
