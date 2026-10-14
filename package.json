@@ -1,0 +1,49 @@
+{
+  "name": "betelgeuse-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "node server.js",
+    "test": "node --test",
+    "test:db": "node scripts/run-database-checks.js",
+    "prisma:generate": "prisma generate",
+    "db:start": "node scripts/local-postgres.js",
+    "db:migrate": "prisma migrate deploy",
+    "db:dev": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "quota:grant": "node scripts/grant-quota.js",
+    "admin:access": "node scripts/admin-access.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1150.0",
+    "@aws-sdk/s3-request-presigner": "^3.1150.0",
+    "@prisma/client": "6.19.0",
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "file-type": "^22.1.1",
+    "helmet": "^8.1.0",
+    "jose": "^6.2.12",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "sharp": "^0.35.5",
+    "zod": "^3.25.49"
+  },
+  "devDependencies": {
+    "embedded-postgres": "18.4.0-beta.17",
+    "prisma": "6.19.0",
+    "supertest": "^7.1.1"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.2",
+    "effect": "^3.20.0"
+  }
+}

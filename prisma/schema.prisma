@@ -1,0 +1,167 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum GenerationStatus {
+  queued
+  processing
+  completed
+  failed
+}
+
+enum GenerationMode {
+  TEXT_TO_VIDEO
+  IMAGE_TO_VIDEO
+  REFERENCE_TO_VIDEO
+}
+
+enum SubscriptionStatus {
+  active
+  expired
+  canceled
+}
+
+enum AuthProvider {
+  google
+  apple
+}
+
+model User {
+  id                String         @id @default(uuid()) @db.Uuid
+  email             String         @unique
+  passwordHash      String
+  name              String
+  telegramId        String?        @unique
+  generationCredits Int            @default(0)
+  isAdmin           Boolean        @default(false)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  generations       Generation[]
+  subscriptions     Subscription[]
+  images            StoredImage[]
+  directUploads     DirectUpload[]
+  identities        AuthIdentity[]
+}
+
+model AuthIdentity {
+  id        String       @id @default(uuid()) @db.Uuid
+  userId    String       @db.Uuid
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider  AuthProvider
+  subject   String
+  createdAt DateTime     @default(now())
+
+  @@unique([provider, subject])
+  @@index([userId])
+}
+
+model OAuthAttempt {
+  id             String       @id @default(uuid()) @db.Uuid
+  provider       AuthProvider
+  stateHash      String       @unique
+  bindingHash    String
+  nonceHash      String
+  codeVerifier   String?
+  frontendOrigin String
+  redirectUri    String
+  createdAt      DateTime     @default(now())
+  expiresAt      DateTime
+  consumedAt     DateTime?
+
+  @@index([expiresAt])
+}
+
+model Generation {
+  id                    String           @id @default(uuid()) @db.Uuid
+  userId                String           @db.Uuid
+  user                  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  model                 String
+  prompt                String
+  mode                  GenerationMode
+  status                GenerationStatus @default(queued)
+  aspectRatio           String
+  duration              Int
+  quality               String
+  sourceImageId         String?          @db.Uuid
+  sourceImage           StoredImage?     @relation(fields: [sourceImageId], references: [id], onDelete: Restrict)
+  sourceImageUrl        String?
+  trendId               String?
+  sourceImageIds        String[]         @default([]) @db.Uuid
+  submissionAttemptedAt DateTime?
+  resultVideoKey        String?
+  providerImageUrl      String?
+  resultVideoUrl        String?
+  providerRequestId     String?          @unique
+  providerStatusUrl     String?
+  errorMessage          String?
+  idempotencyKey        String
+  payloadHash           String
+  quotaCost             Int
+  quotaRefunded         Boolean          @default(false)
+  attempts              Int              @default(0)
+  nextPollAt            DateTime         @default(now())
+  leaseToken            String?
+  lockedUntil           DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt])
+  @@index([status, nextPollAt, lockedUntil])
+}
+
+model StoredImage {
+  id          String       @id @default(uuid()) @db.Uuid
+  userId      String       @db.Uuid
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filename    String       @unique
+  mimeType    String
+  size        Int
+  storageKind String       @default("local")
+  createdAt   DateTime     @default(now())
+  generations Generation[]
+
+  @@index([userId, createdAt])
+}
+
+model DirectUpload {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trendId   String
+  objectKey String   @unique
+  mimeType  String
+  size      Int
+  imageId   String?  @db.Uuid
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model Plan {
+  id              String         @id @default(uuid()) @db.Uuid
+  name            String         @unique
+  price           Decimal?       @db.Decimal(10, 2)
+  generationLimit Int?
+  subscriptions   Subscription[]
+}
+
+model Subscription {
+  id        String             @id @default(uuid()) @db.Uuid
+  userId    String             @db.Uuid
+  planId    String             @db.Uuid
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan      Plan               @relation(fields: [planId], references: [id], onDelete: Restrict)
+  status    SubscriptionStatus @default(active)
+  expiresAt DateTime?
+
+  @@index([userId, status])
+  @@index([planId])
+}

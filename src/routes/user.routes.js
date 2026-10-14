@@ -1,0 +1,14 @@
+import { Router } from 'express';
+import { authenticate } from '../middleware/auth.js';
+import { me } from '../controllers/auth.controller.js';
+import { list } from '../controllers/generation.controller.js';
+import { listSchema } from '../services/generation.service.js';
+import { validate } from '../middleware/validate.js';
+import * as workspace from '../controllers/workspace.controller.js';
+const router = Router();
+router.use(authenticate);
+router.get('/me', me);
+router.get('/me/generations', validate(listSchema, 'query'), list);
+router.get('/me/billing', workspace.billing);
+router.get('/me/images', validate(listSchema, 'query'), workspace.images);
+export default router;
