@@ -20,7 +20,13 @@ export async function processGeneration(
   async function finish(
     status,
     errorMessage,
-    { url = null, resultVideoKey = null, resultImageUrls = [], refund = false } = {},
+    {
+      url = null,
+      resultVideoKey = null,
+      resultImageUrls = [],
+      resultImageKeys = [],
+      refund = false,
+    } = {},
   ) {
     await db.$transaction(async (tx) => {
       const changed = await tx.generation.updateMany({
@@ -31,6 +37,7 @@ export async function processGeneration(
           resultVideoUrl: url,
           resultVideoKey,
           resultImageUrls,
+          resultImageKeys,
           leaseToken: null,
           lockedUntil: null,
           ...(refund ? { quotaRefunded: true } : {}),
@@ -60,6 +67,14 @@ export async function processGeneration(
         { refund: !submissionStarted },
       );
       return;
+    }
+    if (!submissionStarted) {
+      const user = await db.user.findUnique({
+        where: { id: row.userId },
+        select: { isAdmin: true },
+      });
+      if (!user?.isAdmin)
+        throw new ProviderError('Генерация доступна только администратору', { refundSafe: true });
     }
     if (row.references?.length && !row.providerRequestId) {
       const images = await db.storedImage.findMany({
@@ -112,13 +127,23 @@ export async function processGeneration(
           validateMediaUrl(image.url);
           return image.url;
         });
-        await finish('completed', null, { resultImageUrls: urls });
+        let resultImageKeys;
+        try {
+          resultImageKeys = await Promise.all(
+            urls.map((url, index) => resultStore.saveImageResult(row, url, index)),
+          );
+        } catch {
+          throw new ProviderError('Не удалось сохранить изображение в R2. Повторяем сохранение.', {
+            retryable: true,
+          });
+        }
+        await finish('completed', null, { resultImageKeys });
         return;
       }
       if (!result.video?.url)
         throw new ProviderError('В ответе провайдера отсутствует видео', { retryable: true });
       validateMediaUrl(result.video.url);
-      if (row.trendId) {
+      {
         let resultVideoKey;
         try {
           resultVideoKey = await resultStore.saveResult(row, result.video.url);
@@ -128,7 +153,7 @@ export async function processGeneration(
           });
         }
         await finish('completed', null, { resultVideoKey });
-      } else await finish('completed', null, { url: result.video.url });
+      }
     } else if (['failed', 'nsfw', 'canceled'].includes(result.status))
       await finish(
         'failed',
@@ -136,7 +161,7 @@ export async function processGeneration(
           ? 'Материал отклонён модерацией'
           : result.status === 'canceled'
             ? 'Задача отменена провайдером'
-            : 'Провайдер не смог создать видео',
+            : 'Провайдер не смог завершить генерацию',
         { refund: true },
       );
     else
@@ -159,10 +184,13 @@ export async function processGeneration(
         retryable: !!error.retryable,
       }),
     );
-    if (submissionStarted && !row.providerRequestId && !error.refundSafe) {
+    if (submissionStarted && !row.providerRequestId) {
       await finish(
         'failed',
-        'Ответ на отправку не подтверждён. Требуется сверка с Higgsfield; автоматический повтор отключён.',
+        error.refundSafe
+          ? error.message
+          : `${error.message}. Ответ на отправку не подтверждён. Требуется сверка с Higgsfield; автоматический повтор отключён.`,
+        { refund: !!error.refundSafe },
       );
     } else if (error.retryable && row.attempts < 7) {
       await update({

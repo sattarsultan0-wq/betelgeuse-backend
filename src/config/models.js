@@ -5,7 +5,7 @@ export { generationCreditCosts, generationCreditCost } from './modelPricing.js';
 export const modelConfigs = [
   {
     id: 'kling',
-    name: 'Kling 3.0',
+    name: 'Kling 3.0 Standard',
     subtitle: 'Standard · через Higgsfield API',
     enabled: true,
     modes: {
@@ -54,42 +54,43 @@ export const modelConfigs = [
   { id: 'veo', name: 'Veo', subtitle: 'Скоро на платформе', enabled: false, modes: {} },
 ];
 export function publicModels() {
-  return modelConfigs.map(({ modes, ...model }) => ({
-    ...model,
-    provider: 'higgsfield',
-    generationType: model.generationType || 'Video',
-    pricingStatus: modelPricing[model.id]?.status || 'unconfigured',
-    supportedInputTypes: [
-      'text',
-      ...new Set(
-        Object.values(modes).flatMap((caps) => (caps.references || []).map((ref) => ref.type)),
+  return modelConfigs
+    .filter((model) => model.enabled)
+    .map(({ modes, ...model }) => ({
+      ...model,
+      provider: 'higgsfield',
+      generationType: model.generationType || 'Video',
+      pricingStatus: modelPricing[model.id]?.status || 'unconfigured',
+      supportedInputTypes: [
+        'text',
+        ...new Set(
+          Object.values(modes).flatMap((caps) => (caps.references || []).map((ref) => ref.type)),
+        ),
+      ],
+      creditCosts: Object.fromEntries(
+        [...new Set(Object.values(modes).flatMap((mode) => mode.durations || []))].map(
+          (duration) => [duration, model.id === 'kling' ? generationCreditCost(duration) : null],
+        ),
       ),
-    ],
-    creditCosts: Object.fromEntries(
-      [...new Set(Object.values(modes).flatMap((mode) => mode.durations || []))].map((duration) => [
-        duration,
-        model.id === 'kling' ? generationCreditCost(duration) : null,
-      ]),
-    ),
-    inputs: {
-      image:
-        !!modes.IMAGE_TO_VIDEO ||
-        Object.values(modes).some((m) => m.references?.some((r) => r.type === 'image')),
-      video: Object.values(modes).some((m) => m.references?.some((r) => r.type === 'video')),
-    },
-    available: model.enabled && providerReady(),
-    modes: Object.fromEntries(
-      Object.entries(modes).map(([key, { endpoint, fixed, qualityField, ...values }]) => [
-        key,
-        {
-          ...values,
-          workflowId: endpoint,
-          documentationUrl: `https://open.higgsfield.ai/models/${endpoint}/api-reference`,
-          references: (values.references || []).map(({ apiField, array, ...ref }) => ref),
-        },
-      ]),
-    ),
-  }));
+      inputs: {
+        image:
+          !!modes.IMAGE_TO_VIDEO ||
+          Object.values(modes).some((m) => m.references?.some((r) => r.type === 'image')),
+        video: Object.values(modes).some((m) => m.references?.some((r) => r.type === 'video')),
+      },
+      available: model.enabled && providerReady(),
+      modes: Object.fromEntries(
+        Object.entries(modes).map(([key, { endpoint, fixed, qualityField, ...values }]) => [
+          key,
+          {
+            ...values,
+            workflowId: endpoint,
+            documentationUrl: `https://open.higgsfield.ai/models/${endpoint}/api-reference`,
+            references: (values.references || []).map(({ apiField, array, ...ref }) => ref),
+          },
+        ]),
+      ),
+    }));
 }
 
 // Enrich the legacy models without changing Professional's supported options.

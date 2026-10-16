@@ -1,3 +1,5 @@
+> ?????????? ?????? 11 ???????: [ADMIN-GENERATIONS.md](ADMIN-GENERATIONS.md). ???????? ??????? ????????? ?????? ADMIN.
+
 # Доступ администратора
 
 Аккаунту `sattarsultan0@gmail.com` назначена роль администратора в локальной БД. Имя Sultan не используется как признак доступа: любой новый аккаунт получает `isAdmin: false`.
@@ -25,3 +27,6 @@ npm run admin:access -- sattarsultan0@gmail.com revoke
 Обновите страницу, чтобы интерфейс получил актуальную роль. Сервер применяет отзыв сразу, включая запросы с ранее выданной cookie.
 
 Изменены схема User и ограничение стоимости Generation (теперь неотрицательное), сервисы авторизации/генераций, worker, app, package.json, frontend App/Header/Generator/TrendDialog/Library и стили. Добавлены миграция `202610130002_admin_access`, middleware/admin.js, routes/admin.routes.js, scripts/admin-access.js, tests/admin.test.js и pages/Admin.jsx.
+# Актуализация: генерации ADMIN
+
+Актуальный порядок включения 11 моделей, хранения в R2 и деплоя: [ADMIN-GENERATIONS.md](ADMIN-GENERATIONS.md). Прежние инструкции назначения `isAdmin` сохраняются; реальные запросы теперь разрешены только ADMIN.

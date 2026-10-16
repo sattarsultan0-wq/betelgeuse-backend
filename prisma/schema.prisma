@@ -97,6 +97,9 @@ model Generation {
   parameters            Json             @default("{}")
   references            Json             @default("[]")
   resultImageUrls       String[]         @default([])
+  resultImageKeys       String[]         @default([])
+  adminTest             Boolean          @default(false)
+  costEstimate          Json             @default("{}")
   sourceImageId         String?          @db.Uuid
   sourceImage           StoredImage?     @relation(fields: [sourceImageId], references: [id], onDelete: Restrict)
   sourceImageUrl        String?
@@ -133,6 +136,7 @@ model StoredImage {
   mimeType    String
   size        Int
   storageKind String       @default("local")
+  durationSeconds Float?
   createdAt   DateTime     @default(now())
   generations Generation[]
 

@@ -20,6 +20,8 @@ const { prisma } = await import('../src/config/prisma.js');
 const { env } = await import('../src/config/env.js');
 const { app } = await import('../src/app.js');
 const { storage } = await import('../src/services/storage.service.js');
+const { r2 } = await import('../src/services/r2.service.js');
+const { mockR2 } = await import('../test-support/mock-r2.js');
 after(() => prisma.$disconnect());
 
 test('reference uploads validate actual content and restrict local filenames', async () => {
@@ -46,6 +48,7 @@ test('worker resolves owned image/video references and maps roles to the verifie
   let payload;
   await processGeneration(row, {
     db: {
+      user: { findUnique: async () => ({ isAdmin: true }) },
       storedImage: {
         findMany: async ({ where }) => {
           assert.equal(where.userId, row.userId);
@@ -222,7 +225,7 @@ test('pricing requires a unique configured rule, includes parameters and preserv
     );
     modelPricing['grok-image-2'].rules.push(modelPricing['grok-image-2'].rules[0]);
     assert.equal(estimateCredits(body).status, 'unconfigured');
-    assert.equal(estimateCredits({ model: 'soul-v2' }, { isAdmin: true }).status, 'unconfigured');
+    assert.equal(estimateCredits({ model: 'soul-v2' }, { isAdmin: true }).status, 'admin_test');
   } finally {
     modelPricing['grok-image-2'] = original;
   }
@@ -254,6 +257,7 @@ test('image result normalization and submission failures never trigger paid retr
       },
     },
     user: {
+      findUnique: async () => ({ isAdmin: true }),
       update: async ({ data }) => {
         credits += data.generationCredits.increment;
       },
@@ -264,6 +268,7 @@ test('image result normalization and submission failures never trigger paid retr
     { ...row },
     {
       db,
+      resultStore: { saveImageResult: async () => 'results/mock.png' },
       provider: {
         status: async () => ({
           status: 'completed',
@@ -272,7 +277,7 @@ test('image result normalization and submission failures never trigger paid retr
       },
     },
   );
-  assert.deepEqual(updates.at(-1).resultImageUrls, ['https://images.higgs.ai/result.png']);
+  assert.deepEqual(updates.at(-1).resultImageKeys, ['results/mock.png']);
   assert.equal(credits, 0);
   Object.assign(row, { status: 'processing', leaseToken: 'lease-2' });
   const failed = { status: async () => ({ status: 'failed' }) };
@@ -336,6 +341,7 @@ test(
   { skip: !process.env.TEST_DATABASE_URL },
   async () => {
     const oldPricing = modelPricing['qwen-image-3'];
+    const restoreR2 = mockR2(env, r2);
     const originalEnabled = env.HIGGSFIELD_ENABLED;
     const originalKey = env.HIGGSFIELD_API_KEY_ID,
       originalSecret = env.HIGGSFIELD_API_KEY_SECRET;
@@ -377,6 +383,14 @@ test(
         false,
       );
       await prisma.user.update({ where: { id: userIds[0] }, data: { generationCredits: 3 } });
+      // A funded ordinary account still cannot start paid work.
+      await agent
+        .post('/api/generations')
+        .set('X-CSRF-Token', csrf)
+        .set('Idempotency-Key', randomUUID())
+        .send(body)
+        .expect(403);
+      await prisma.user.update({ where: { id: userIds[0] }, data: { isAdmin: true } });
       const image = await prisma.storedImage.create({
         data: {
           userId: userIds[1],
@@ -414,14 +428,8 @@ test(
       assert.equal(receipts[0].body.generation.id, receipts[1].body.generation.id);
       assert.equal(
         (await prisma.user.findUnique({ where: { id: userIds[0] } })).generationCredits,
-        0,
+        3,
       );
-      await agent
-        .post('/api/generations')
-        .set('X-CSRF-Token', csrf)
-        .set('Idempotency-Key', randomUUID())
-        .send(body)
-        .expect(402);
       // A tariff change cannot turn a retry of an accepted request into a second debit.
       modelPricing['qwen-image-3'] = { status: 'unconfigured', rules: [] };
       await agent
@@ -457,6 +465,7 @@ test(
       };
       assert.equal((await post('/api/generations/estimate', estimate).expect(200)).body.credits, 0);
     } finally {
+      restoreR2();
       await prisma.user.deleteMany({ where: { id: { in: userIds } } });
       modelPricing['qwen-image-3'] = oldPricing;
       env.HIGGSFIELD_ENABLED = originalEnabled;

@@ -48,7 +48,8 @@ test('disallowed CORS origin is denied', async () => {
 });
 test('models expose capabilities without provider endpoints or secrets', async () => {
   const { body } = await request(app).get('/api/models').expect(200);
-  assert.equal(body.models[1].enabled, false);
+  assert.equal(body.models.length, 11);
+  assert.ok(body.models.every((model) => model.enabled));
   assert.equal(body.models[0].id, 'kling');
   assert.equal(body.models[0].enabled, true);
   assert.deepEqual(body.models[0].modes.IMAGE_TO_VIDEO.qualities, ['standard']);

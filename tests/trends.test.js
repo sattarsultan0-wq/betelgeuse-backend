@@ -284,7 +284,7 @@ function workerDb(row) {
           filename: `images/${id}.jpg`,
         })),
     },
-    user: { update: async () => {} },
+    user: { update: async () => {}, findUnique: async () => ({ isAdmin: true }) },
   };
   db.$transaction = (fn) => fn(db);
   return { db, updates };
@@ -503,8 +503,11 @@ test(
         .set('X-CSRF-Token', token)
         .set('Idempotency-Key', randomUUID())
         .send({ trendId: 'litvin', photoKeys })
-        .expect(402);
-      await prisma.user.update({ where: { id: userId }, data: { generationCredits: 1 } });
+        .expect(403);
+      await prisma.user.update({
+        where: { id: userId },
+        data: { isAdmin: true, generationCredits: 1 },
+      });
       const key = randomUUID(),
         body = { trendId: 'litvin', photoKeys };
       const responses = await Promise.all(
@@ -522,7 +525,7 @@ test(
       );
       const generationId = responses[0].body.generation.id;
       assert.equal(generationId, responses[1].body.generation.id);
-      assert.equal((await prisma.user.findUnique({ where: { id: userId } })).generationCredits, 0);
+      assert.equal((await prisma.user.findUnique({ where: { id: userId } })).generationCredits, 1);
       let row = await prisma.generation.update({
         where: { id: generationId },
         data: { leaseToken: 'test' },

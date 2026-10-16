@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../config/prisma.js';
-import { env, providerReady } from '../config/env.js';
+import { env, providerReady, r2Ready } from '../config/env.js';
 import { validateModelInput } from './model-validation.service.js';
-import { estimateCredits } from './pricing.service.js';
+import { estimateCredits, estimateProviderCost } from './pricing.service.js';
 import { AppError } from '../middleware/errors.js';
 import { r2 } from './r2.service.js';
 export const generationSchema = z
@@ -40,7 +40,7 @@ export const estimateSchema = generationSchema.omit({
 export const listSchema = z
   .object({ page: z.coerce.number().int().min(1).max(10000).default(1) })
   .strict();
-export function validateGeneration(body) {
+export function validateGeneration(body, user = {}) {
   const { caps: mode } = validateModelInput(body);
   if (
     body.mode === 'REFERENCE_TO_VIDEO' &&
@@ -49,8 +49,8 @@ export function validateGeneration(body) {
       body.sourceImageIds.length > (mode.maxPhotos || 1))
   )
     throw new AppError(400, 'Некорректные фотографии для выбранной модели');
-  const quote = estimateCredits(body);
-  if (quote.status !== 'configured')
+  const quote = estimateCredits(body, user);
+  if (!['configured', 'admin_test'].includes(quote.status))
     throw new AppError(400, 'Стоимость генерации не настроена', 'PRICING_UNCONFIGURED');
   return quote.credits;
 }
@@ -73,6 +73,8 @@ export const publicGeneration = ({
   errorMessage,
   createdAt,
   updatedAt,
+  adminTest,
+  costEstimate,
 }) => ({
   id,
   model,
@@ -91,26 +93,56 @@ export const publicGeneration = ({
   errorMessage,
   createdAt,
   updatedAt,
+  adminTest: adminTest === true,
+  costEstimate,
 });
 export async function presentGeneration(row) {
   const value = publicGeneration(row);
   if (row.resultVideoKey) value.resultVideoUrl = await r2.signRead(row.resultVideoKey, 3600);
+  if (row.resultImageKeys?.length)
+    value.resultImageUrls = await Promise.all(
+      row.resultImageKeys.map((key) => r2.signRead(key, 3600)),
+    );
   return value;
 }
+// Object key order has no meaning in JSON; reference array order does.
+const canonical = (value) =>
+  Array.isArray(value)
+    ? value.map(canonical)
+    : value && typeof value === 'object'
+      ? Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map((key) => [key, canonical(value[key])]),
+        )
+      : value;
 export async function createGeneration(userId, body, idempotencyKey) {
+  const account = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isAdmin: true },
+  });
+  if (!account) throw new AppError(401, 'Аккаунт не найден');
+  if (!account.isAdmin)
+    throw new AppError(403, 'Генерация доступна только администратору', 'ADMIN_REQUIRED');
   z.string().uuid().parse(idempotencyKey);
   validateModelInput(body);
-  const payloadHash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
+  const payloadHash = createHash('sha256')
+    .update(JSON.stringify(canonical(body)))
+    .digest('hex');
+  const legacyHash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
+  const samePayload = (row) => row.payloadHash === payloadHash || row.payloadHash === legacyHash;
   const existing = await prisma.generation.findUnique({
     where: { userId_idempotencyKey: { userId, idempotencyKey } },
   });
   if (existing) {
-    if (existing.payloadHash !== payloadHash)
+    if (!samePayload(existing))
       throw new AppError(409, 'Идентификатор запроса уже использован с другими параметрами');
     return existing;
   }
-  const requestedCost = validateGeneration(body);
+  validateGeneration(body, account);
   if (!providerReady()) throw new AppError(503, 'Higgsfield API ещё не подключён');
+  if (!r2Ready())
+    throw new AppError(503, 'Настройте R2 для сохранения результатов', 'STORAGE_UNAVAILABLE');
   try {
     return await prisma.$transaction(async (tx) => {
       // Lock the account before reading its role, debiting credits or checking active jobs.
@@ -120,6 +152,9 @@ export async function createGeneration(userId, body, idempotencyKey) {
       });
       if (!locked.count) throw new AppError(401, 'Аккаунт не найден');
       const user = await tx.user.findUnique({ where: { id: userId }, select: { isAdmin: true } });
+      if (!user.isAdmin)
+        throw new AppError(403, 'Генерация доступна только администратору', 'ADMIN_REQUIRED');
+      const requestedCost = validateGeneration(body, user);
       const quotaCost = user.isAdmin ? 0 : requestedCost;
       if (quotaCost) {
         const debit = await tx.user.updateMany({
@@ -140,6 +175,7 @@ export async function createGeneration(userId, body, idempotencyKey) {
         if (!image.mimeType.startsWith('image/')) throw new AppError(400, 'Требуется изображение');
       }
       const { model, caps } = validateModelInput(body);
+      let referenceDuration;
       if (body.references?.length) {
         const inputs = await tx.storedImage.findMany({
           where: { id: { in: body.references.map((ref) => ref.uploadId) }, userId },
@@ -150,6 +186,7 @@ export async function createGeneration(userId, body, idempotencyKey) {
           if (!stored) throw new AppError(404, 'Референс не найден');
           if (!rule.mimeTypes.includes(stored.mimeType) || stored.size > rule.maxBytes)
             throw new AppError(400, 'Формат или размер референса не поддерживается');
+          if (rule.type === 'video') referenceDuration = stored.durationSeconds;
         }
       }
       if (body.trendId) {
@@ -169,6 +206,12 @@ export async function createGeneration(userId, body, idempotencyKey) {
           idempotencyKey,
           payloadHash,
           quotaCost,
+          adminTest: true,
+          costEstimate: {
+            ...estimateProviderCost(body, referenceDuration),
+            baseCredits: estimateCredits(body).baseCredits,
+            chargedCredits: 0,
+          },
           sourceImageUrl: body.sourceImageId ? `/api/uploads/${body.sourceImageId}` : null,
         },
       });
@@ -178,7 +221,7 @@ export async function createGeneration(userId, body, idempotencyKey) {
       const found = await prisma.generation.findUnique({
         where: { userId_idempotencyKey: { userId, idempotencyKey } },
       });
-      if (found && found.payloadHash === payloadHash) return found;
+      if (found && samePayload(found)) return found;
       if (error.code === 'P2002') throw new AppError(409, 'Конфликт параметров повторного запроса');
     }
     throw error;

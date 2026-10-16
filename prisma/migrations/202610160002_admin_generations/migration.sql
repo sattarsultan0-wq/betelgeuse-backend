@@ -1,0 +1,6 @@
+ALTER TABLE "Generation"
+  ADD COLUMN "resultImageKeys" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  ADD COLUMN "adminTest" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN "costEstimate" JSONB NOT NULL DEFAULT '{}';
+
+ALTER TABLE "StoredImage" ADD COLUMN "durationSeconds" DOUBLE PRECISION;

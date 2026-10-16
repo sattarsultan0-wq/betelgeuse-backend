@@ -119,14 +119,19 @@ async function providerRequest(path, { method = 'GET', body, idempotencyKey } = 
     const retryable = [408, 423, 429, 500, 502, 503, 504].includes(response.status);
     const messages = {
       401: 'Проверьте ключи Higgsfield на сервере',
+      400: 'Higgsfield отклонил параметры или достигнут лимит одновременных генераций',
+      402: 'Недостаточно средств у провайдера',
       403: 'Недостаточно средств у провайдера',
       404: 'Модель или задача недоступна аккаунту',
       422: 'Провайдер отклонил параметры генерации',
+      423: 'Модель временно заблокирована провайдером',
+      429: 'Превышен лимит запросов Higgsfield',
+      503: 'Модель отключена или не готова у Higgsfield',
     };
     await response.body?.cancel();
     throw new ProviderError(messages[response.status] || `Ошибка Higgsfield (${response.status})`, {
       retryable,
-      refundSafe: !retryable && response.status < 500,
+      refundSafe: response.status < 500 && response.status !== 408,
     });
   }
   try {

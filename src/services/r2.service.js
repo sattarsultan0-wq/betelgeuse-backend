@@ -103,4 +103,14 @@ export const r2 = {
     await this.put(key, buffer, 'video/mp4');
     return key;
   },
+  async saveImageResult(generation, url, index) {
+    const stream = await requestMedia(url, { maxBytes: 25 * 1024 * 1024 });
+    const buffer = await boundedBuffer(stream, 25 * 1024 * 1024);
+    const type = await fileTypeFromBuffer(buffer);
+    if (!PHOTO_TYPES.includes(type?.mime))
+      throw new AppError(502, 'Провайдер вернул файл неверного типа');
+    const key = `results/${generation.userId}/${generation.id}/${index}.${type.ext}`;
+    await this.put(key, buffer, type.mime);
+    return key;
+  },
 };

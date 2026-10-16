@@ -13,6 +13,8 @@ const { env } = await import('../src/config/env.js');
 const { createGeneration } = await import('../src/services/generation.service.js');
 const { processGeneration } = await import('../src/jobs/generation.worker.js');
 const ids = [];
+const { r2 } = await import('../src/services/r2.service.js');
+const { mockR2 } = await import('../test-support/mock-r2.js');
 after(async () => {
   if (ids.length) await prisma.user.deleteMany({ where: { id: { in: ids } } });
   await prisma.$disconnect();
@@ -27,6 +29,7 @@ test(
   { skip: !process.env.TEST_DATABASE_URL },
   async () => {
     const originalEnv = { ...env };
+    const restoreR2 = mockR2(env, r2);
     try {
       const agent = request.agent(app),
         token = (await agent.get('/api/auth/csrf')).body.token;
@@ -62,7 +65,12 @@ test(
         quality: 'standard',
         aspectRatio: '16:9',
       };
-      await assert.rejects(createGeneration(userId, body, randomUUID()), { status: 402 });
+      await prisma.user.update({ where: { id: userId }, data: { generationCredits: 50 } });
+      await assert.rejects(createGeneration(userId, body, randomUUID()), {
+        status: 403,
+        code: 'ADMIN_REQUIRED',
+      });
+      await prisma.user.update({ where: { id: userId }, data: { generationCredits: 0 } });
       await prisma.user.update({ where: { id: userId }, data: { isAdmin: true } });
       assert.equal((await agent.get('/api/auth/me').expect(200)).body.user.isAdmin, true);
       const status = await agent.get('/api/admin/status').expect(200);
@@ -75,6 +83,8 @@ test(
       ]);
       assert.equal(first.id, repeat.id);
       assert.equal(first.quotaCost, 0);
+      assert.equal(first.adminTest, true);
+      assert.equal(first.costEstimate.amountUsd, 0.42);
       assert.equal((await prisma.user.findUnique({ where: { id: userId } })).generationCredits, 0);
       const receipt = randomUUID();
       const row = await prisma.generation.update({
@@ -99,8 +109,10 @@ test(
       await prisma.user.update({ where: { id: userId }, data: { isAdmin: false } });
       await agent.get('/api/admin/status').expect(403);
       assert.equal((await agent.get('/api/auth/me').expect(200)).body.user.isAdmin, false);
-      await assert.rejects(createGeneration(userId, body, randomUUID()), { status: 402 });
+      await assert.rejects(createGeneration(userId, body, randomUUID()), { status: 403 });
+      await assert.rejects(createGeneration(userId, body, key), { status: 403 });
     } finally {
+      restoreR2();
       Object.assign(env, originalEnv);
     }
   },
