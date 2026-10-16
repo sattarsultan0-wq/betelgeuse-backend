@@ -6,7 +6,10 @@ import { r2 } from '../services/r2.service.js';
 import { pipeline } from 'node:stream/promises';
 export async function upload(req, res) {
   if (!req.file) throw new AppError(400, 'Добавьте изображение');
-  const stored = await storage.saveImage(req.file);
+  const stored =
+    req.path === '/references'
+      ? await storage.saveReference(req.file)
+      : await storage.saveImage(req.file);
   try {
     const image = await prisma.storedImage.create({ data: { ...stored, userId: req.userId } });
     res.status(201).json({

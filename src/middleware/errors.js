@@ -20,7 +20,7 @@ export function errorHandler(error, req, res, next) {
       code: 'UPLOAD',
       message:
         error.code === 'LIMIT_FILE_SIZE'
-          ? 'Размер изображения превышает 10 МБ'
+          ? 'Файл превышает допустимый размер'
           : 'Некорректная загрузка файла',
     });
   if (error.code === 'P2002')
@@ -34,9 +34,7 @@ export function errorHandler(error, req, res, next) {
   if (error.status === 400)
     return res.status(400).json({ code: 'BODY', message: 'Некорректное тело запроса' });
   if (error.status === 413)
-    return res
-      .status(413)
-      .json({ code: 'BODY_TOO_LARGE', message: 'Запрос слишком большой' });
+    return res.status(413).json({ code: 'BODY_TOO_LARGE', message: 'Запрос слишком большой' });
   console.error(
     JSON.stringify({
       event: 'request_error',
@@ -45,10 +43,8 @@ export function errorHandler(error, req, res, next) {
       code: error.code || 'INTERNAL',
     }),
   );
-  return res
-    .status(503)
-    .json({
-      code: 'UNAVAILABLE',
-      message: 'Сервис временно недоступен. Попробуйте позже.',
-    });
+  return res.status(503).json({
+    code: 'UNAVAILABLE',
+    message: 'Сервис временно недоступен. Попробуйте позже.',
+  });
 }

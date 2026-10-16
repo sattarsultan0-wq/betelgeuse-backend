@@ -2,40 +2,46 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../config/prisma.js';
 import { env, providerReady } from '../config/env.js';
-import { modelConfigs, generationCreditCost } from '../config/models.js';
+import { validateModelInput } from './model-validation.service.js';
+import { estimateCredits } from './pricing.service.js';
 import { AppError } from '../middleware/errors.js';
 import { r2 } from './r2.service.js';
 export const generationSchema = z
   .object({
     model: z.string().max(80),
     prompt: z.string().trim().min(1).max(2000),
-    mode: z.enum(['TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO']),
-    aspectRatio: z.enum(['16:9', '9:16', '1:1', 'source']),
-    duration: z.number().int(),
-    quality: z.string().max(20),
+    mode: z.enum([
+      'TEXT_TO_VIDEO',
+      'IMAGE_TO_VIDEO',
+      'TEXT_TO_IMAGE',
+      'IMAGE_TO_IMAGE',
+      'VIDEO_TO_VIDEO',
+      'FIRST_LAST_FRAME',
+      'MOTION_CONTROL',
+    ]),
+    aspectRatio: z.string().max(20).optional(),
+    duration: z.number().int().min(1).max(30).optional(),
+    quality: z.string().max(20).optional(),
+    parameters: z
+      .record(z.union([z.string().max(80), z.boolean(), z.number().finite()]))
+      .optional(),
+    references: z
+      .array(z.object({ role: z.string().min(1).max(30), uploadId: z.string().uuid() }).strict())
+      .max(8)
+      .optional(),
     sourceImageId: z.string().uuid().optional(),
   })
   .strict();
+export const estimateSchema = generationSchema.omit({
+  prompt: true,
+  sourceImageId: true,
+  references: true,
+});
 export const listSchema = z
   .object({ page: z.coerce.number().int().min(1).max(10000).default(1) })
   .strict();
 export function validateGeneration(body) {
-  if (!body.prompt?.trim() || body.prompt.length > 2000)
-    throw new AppError(400, 'Требуется непустой промпт до 2000 символов');
-  const config = modelConfigs.find((item) => item.id === body.model);
-  if (!config?.enabled) throw new AppError(400, 'Эта модель пока недоступна');
-  const mode = config.modes[body.mode];
-  if (
-    !mode ||
-    !mode.aspectRatios.includes(body.aspectRatio) ||
-    !mode.durations.includes(body.duration) ||
-    !mode.qualities.includes(body.quality)
-  )
-    throw new AppError(400, 'Выбранные параметры не поддерживаются моделью');
-  if (body.mode === 'IMAGE_TO_VIDEO' && !body.sourceImageId)
-    throw new AppError(400, 'Для этого режима требуется изображение');
-  if (body.mode === 'TEXT_TO_VIDEO' && body.sourceImageId)
-    throw new AppError(400, 'Изображение не поддерживается текстовым режимом');
+  const { caps: mode } = validateModelInput(body);
   if (
     body.mode === 'REFERENCE_TO_VIDEO' &&
     (!body.trendId ||
@@ -43,9 +49,10 @@ export function validateGeneration(body) {
       body.sourceImageIds.length > (mode.maxPhotos || 1))
   )
     throw new AppError(400, 'Некорректные фотографии для выбранной модели');
-  const creditCost = generationCreditCost(body.duration);
-  if (!Number.isInteger(creditCost)) throw new AppError(400, 'Стоимость генерации не настроена');
-  return creditCost;
+  const quote = estimateCredits(body);
+  if (quote.status !== 'configured')
+    throw new AppError(400, 'Стоимость генерации не настроена', 'PRICING_UNCONFIGURED');
+  return quote.credits;
 }
 export const publicGeneration = ({
   id,
@@ -61,6 +68,8 @@ export const publicGeneration = ({
   quotaRefunded,
   sourceImageUrl,
   resultVideoUrl,
+  resultImageUrls,
+  generationType,
   errorMessage,
   createdAt,
   updatedAt,
@@ -77,6 +86,8 @@ export const publicGeneration = ({
   requiresReview: status === 'failed' && !!submissionAttemptedAt && !quotaRefunded,
   sourceImageUrl,
   resultVideoUrl,
+  resultImageUrls: resultImageUrls || [],
+  generationType: generationType || 'Video',
   errorMessage,
   createdAt,
   updatedAt,
@@ -88,7 +99,7 @@ export async function presentGeneration(row) {
 }
 export async function createGeneration(userId, body, idempotencyKey) {
   z.string().uuid().parse(idempotencyKey);
-  const requestedCost = validateGeneration(body);
+  validateModelInput(body);
   const payloadHash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
   const existing = await prisma.generation.findUnique({
     where: { userId_idempotencyKey: { userId, idempotencyKey } },
@@ -98,6 +109,7 @@ export async function createGeneration(userId, body, idempotencyKey) {
       throw new AppError(409, 'Идентификатор запроса уже использован с другими параметрами');
     return existing;
   }
+  const requestedCost = validateGeneration(body);
   if (!providerReady()) throw new AppError(503, 'Higgsfield API ещё не подключён');
   try {
     return await prisma.$transaction(async (tx) => {
@@ -125,6 +137,20 @@ export async function createGeneration(userId, body, idempotencyKey) {
       if (body.sourceImageId) {
         const image = await tx.storedImage.findFirst({ where: { id: body.sourceImageId, userId } });
         if (!image) throw new AppError(404, 'Изображение не найдено');
+        if (!image.mimeType.startsWith('image/')) throw new AppError(400, 'Требуется изображение');
+      }
+      const { model, caps } = validateModelInput(body);
+      if (body.references?.length) {
+        const inputs = await tx.storedImage.findMany({
+          where: { id: { in: body.references.map((ref) => ref.uploadId) }, userId },
+        });
+        for (const ref of body.references) {
+          const stored = inputs.find((item) => item.id === ref.uploadId);
+          const rule = caps.references.find((item) => item.role === ref.role);
+          if (!stored) throw new AppError(404, 'Референс не найден');
+          if (!rule.mimeTypes.includes(stored.mimeType) || stored.size > rule.maxBytes)
+            throw new AppError(400, 'Формат или размер референса не поддерживается');
+        }
       }
       if (body.trendId) {
         const count = await tx.storedImage.count({
@@ -135,6 +161,10 @@ export async function createGeneration(userId, body, idempotencyKey) {
       return tx.generation.create({
         data: {
           ...body,
+          duration: body.duration ?? 0,
+          quality: body.quality ?? '',
+          aspectRatio: body.aspectRatio ?? '',
+          generationType: model.generationType || 'Video',
           userId,
           idempotencyKey,
           payloadHash,

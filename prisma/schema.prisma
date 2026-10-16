@@ -19,6 +19,11 @@ enum GenerationMode {
   TEXT_TO_VIDEO
   IMAGE_TO_VIDEO
   REFERENCE_TO_VIDEO
+  TEXT_TO_IMAGE
+  IMAGE_TO_IMAGE
+  VIDEO_TO_VIDEO
+  FIRST_LAST_FRAME
+  MOTION_CONTROL
 }
 
 enum SubscriptionStatus {
@@ -88,6 +93,10 @@ model Generation {
   aspectRatio           String
   duration              Int
   quality               String
+  generationType        String           @default("Video")
+  parameters            Json             @default("{}")
+  references            Json             @default("[]")
+  resultImageUrls       String[]         @default([])
   sourceImageId         String?          @db.Uuid
   sourceImage           StoredImage?     @relation(fields: [sourceImageId], references: [id], onDelete: Restrict)
   sourceImageUrl        String?

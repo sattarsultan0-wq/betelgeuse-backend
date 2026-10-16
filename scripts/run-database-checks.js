@@ -29,7 +29,8 @@ const pg = new EmbeddedPostgres({
   user: 'qa',
   password,
   port,
-  persistent: false,
+  // Windows may briefly retain process handles after stop; clean up with retries below.
+  persistent: true,
   authMethod: 'scram-sha-256',
   initdbFlags: ['--encoding=UTF8', '--locale=C'],
   postgresFlags: ['-h', '127.0.0.1'],
@@ -72,4 +73,9 @@ try {
   process.exitCode = migrated || (await run(['--test']));
 } finally {
   await pg.stop();
+  // `resolved` was verified above to be a dedicated test cluster inside os.tmpdir().
+  await fs.rm(resolved, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 });
 }
+// embedded-postgres can leave inherited pipe handles on Windows after taskkill.
+// Tests and cluster cleanup are complete; preserve their exit code explicitly.
+process.exit(process.exitCode || 0);

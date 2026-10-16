@@ -16,6 +16,23 @@ const middleware = multer({
   },
 });
 router.post(
+  '/references',
+  rateLimit({ windowMs: 60000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false }),
+  multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024, files: 1, fields: 0, parts: 1 },
+    fileFilter(req, file, callback) {
+      callback(
+        ['image/jpeg', 'image/png', 'image/webp', 'video/mp4'].includes(file.mimetype)
+          ? null
+          : new AppError(400, 'Поддерживаются JPEG, PNG, WebP и MP4'),
+        true,
+      );
+    },
+  }).single('file'),
+  upload,
+);
+router.post(
   '/',
   rateLimit({
     windowMs: 60000,

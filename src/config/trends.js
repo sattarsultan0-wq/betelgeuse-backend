@@ -3,6 +3,7 @@ import { modelConfigs } from './models.js';
 import { providerReady, r2Ready } from './env.js';
 import { AppError } from '../middleware/errors.js';
 import { showcaseMedia } from './showcase-media.js';
+import { estimateCredits } from '../services/pricing.service.js';
 
 // Server-only prompts. Fill in prompt and choose an enabled model from models.js.
 // Kling 3.0 Standard IMAGE_TO_VIDEO takes exactly one photo.
@@ -103,7 +104,7 @@ export function publicTrends() {
         : !r2Ready() || !providerReady()
           ? 'Генерация временно недоступна.'
           : null,
-      quotaCost: value.duration / 5,
+      quotaCost: estimateCredits(value).credits,
     };
   });
 }

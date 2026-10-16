@@ -39,7 +39,7 @@ export async function billing(req, res) {
 
 export async function images(req, res) {
   const page = req.validatedQuery.page;
-  const where = { userId: req.userId };
+  const where = { userId: req.userId, mimeType: { startsWith: 'image/' } };
   const [rows, total] = await Promise.all([
     prisma.storedImage.findMany({
       where,

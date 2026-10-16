@@ -7,7 +7,20 @@ import { fileTypeFromBuffer } from 'file-type';
 import { AppError } from '../middleware/errors.js';
 const directory = fileURLToPath(new URL('../../uploads/', import.meta.url));
 export const storage = {
+  async saveReference(file) {
+    if (file.mimetype !== 'video/mp4') return this.saveImage(file);
+    const type = await fileTypeFromBuffer(file.buffer);
+    if (type?.mime !== 'video/mp4')
+      throw new AppError(400, 'Содержимое файла не соответствует MP4');
+    if (file.size > 50 * 1024 * 1024) throw new AppError(400, 'Видео превышает 50 МБ');
+    const filename = `${randomUUID()}.mp4`;
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(path.join(directory, filename), file.buffer, { flag: 'wx' });
+    return { filename, mimeType: 'video/mp4', size: file.buffer.length };
+  },
   async saveImage(file) {
+    if (file.buffer.length > 10 * 1024 * 1024)
+      throw new AppError(400, 'Изображение превышает 10 МБ');
     const type = await fileTypeFromBuffer(file.buffer);
     const allowed = ['image/jpeg', 'image/png', 'image/webp'];
     if (!type || !allowed.includes(type.mime) || type.mime !== file.mimetype)
@@ -27,7 +40,8 @@ export const storage = {
     return { filename, mimeType: 'image/webp', size: buffer.length };
   },
   resolve(filename) {
-    if (!/^[0-9a-f-]{36}\.webp$/.test(filename)) throw new AppError(400, 'Недопустимое имя файла');
+    if (!/^[0-9a-f-]{36}\.(webp|mp4)$/.test(filename))
+      throw new AppError(400, 'Недопустимое имя файла');
     return path.join(directory, filename);
   },
   async read(filename) {

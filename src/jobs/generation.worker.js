@@ -20,7 +20,7 @@ export async function processGeneration(
   async function finish(
     status,
     errorMessage,
-    { url = null, resultVideoKey = null, refund = false } = {},
+    { url = null, resultVideoKey = null, resultImageUrls = [], refund = false } = {},
   ) {
     await db.$transaction(async (tx) => {
       const changed = await tx.generation.updateMany({
@@ -30,6 +30,7 @@ export async function processGeneration(
           errorMessage,
           resultVideoUrl: url,
           resultVideoKey,
+          resultImageUrls,
           leaseToken: null,
           lockedUntil: null,
           ...(refund ? { quotaRefunded: true } : {}),
@@ -43,7 +44,7 @@ export async function processGeneration(
     });
   }
   try {
-    if (row.trendId && row.submissionAttemptedAt && !row.providerRequestId) {
+    if (row.submissionAttemptedAt && !row.providerRequestId) {
       await finish(
         'failed',
         'Отправка провайдеру не подтверждена. Повторный запуск остановлен; требуется сверка задачи и квоты администратором.',
@@ -51,10 +52,26 @@ export async function processGeneration(
       return;
     }
     if (now() - new Date(row.createdAt).getTime() > env.GENERATION_TIMEOUT_MS) {
-      await finish('failed', 'Превышено время ожидания. Квота сохранена до сверки с провайдером.');
+      await finish(
+        'failed',
+        submissionStarted
+          ? 'Превышено время ожидания. Квота сохранена до сверки с провайдером.'
+          : 'Превышено время ожидания до отправки.',
+        { refund: !submissionStarted },
+      );
       return;
     }
-    if (row.trendId && !row.providerRequestId) {
+    if (row.references?.length && !row.providerRequestId) {
+      const images = await db.storedImage.findMany({
+        where: { id: { in: row.references.map((ref) => ref.uploadId) }, userId: row.userId },
+      });
+      row.providerReferences = [];
+      for (const ref of row.references) {
+        const input = images.find((item) => item.id === ref.uploadId);
+        if (!input) throw new ProviderError('Исходный референс недоступен', { refundSafe: true });
+        row.providerReferences.push({ role: ref.role, url: await provider.uploadImage(input) });
+      }
+    } else if (row.trendId && !row.providerRequestId) {
       const ids = row.sourceImageIds;
       const images = await db.storedImage.findMany({
         where: { id: { in: ids }, userId: row.userId, storageKind: 'r2' },
@@ -75,10 +92,8 @@ export async function processGeneration(
     }
     let result;
     if (!row.providerRequestId) {
-      if (row.trendId) {
-        row.submissionAttemptedAt = new Date(now());
-        await update({ submissionAttemptedAt: row.submissionAttemptedAt });
-      }
+      row.submissionAttemptedAt = new Date(now());
+      await update({ submissionAttemptedAt: row.submissionAttemptedAt });
       submissionStarted = true;
       result = await provider.submit(row);
       row.providerRequestId = result.request_id;
@@ -90,6 +105,16 @@ export async function processGeneration(
       });
     } else result = await provider.status(row);
     if (result.status === 'completed') {
+      if (row.generationType === 'Image') {
+        if (!result.images?.length)
+          throw new ProviderError('В ответе отсутствует изображение', { retryable: true });
+        const urls = result.images.map((image) => {
+          validateMediaUrl(image.url);
+          return image.url;
+        });
+        await finish('completed', null, { resultImageUrls: urls });
+        return;
+      }
       if (!result.video?.url)
         throw new ProviderError('В ответе провайдера отсутствует видео', { retryable: true });
       validateMediaUrl(result.video.url);
@@ -134,7 +159,7 @@ export async function processGeneration(
         retryable: !!error.retryable,
       }),
     );
-    if (row.trendId && submissionStarted && !row.providerRequestId && !error.refundSafe) {
+    if (submissionStarted && !row.providerRequestId && !error.refundSafe) {
       await finish(
         'failed',
         'Ответ на отправку не подтверждён. Требуется сверка с Higgsfield; автоматический повтор отключён.',

@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
-import { generationSchema, listSchema } from '../services/generation.service.js';
+import { generationSchema, estimateSchema, listSchema } from '../services/generation.service.js';
 import * as controller from '../controllers/generation.controller.js';
 const router = Router();
 router.use(authenticate);
+router.post('/estimate', validate(estimateSchema), controller.estimate);
 router.post(
   '/',
   rateLimit({

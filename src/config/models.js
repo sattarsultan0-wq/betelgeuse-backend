@@ -1,7 +1,7 @@
 import { providerReady } from './env.js';
-// Existing internal quota; this is not a provider price or a payment tariff.
-export const generationCreditCosts = { 5: 1, 10: 2 };
-export const generationCreditCost = (duration) => generationCreditCosts[duration];
+import { workflowModels } from './workflowModels.js';
+import { modelPricing, generationCreditCost } from './modelPricing.js';
+export { generationCreditCosts, generationCreditCost } from './modelPricing.js';
 export const modelConfigs = [
   {
     id: 'kling',
@@ -56,17 +56,64 @@ export const modelConfigs = [
 export function publicModels() {
   return modelConfigs.map(({ modes, ...model }) => ({
     ...model,
-    generationType: 'Video',
+    provider: 'higgsfield',
+    generationType: model.generationType || 'Video',
+    pricingStatus: modelPricing[model.id]?.status || 'unconfigured',
+    supportedInputTypes: [
+      'text',
+      ...new Set(
+        Object.values(modes).flatMap((caps) => (caps.references || []).map((ref) => ref.type)),
+      ),
+    ],
     creditCosts: Object.fromEntries(
       [...new Set(Object.values(modes).flatMap((mode) => mode.durations || []))].map((duration) => [
         duration,
-        generationCreditCost(duration),
+        model.id === 'kling' ? generationCreditCost(duration) : null,
       ]),
     ),
-    inputs: { image: !!modes.IMAGE_TO_VIDEO, video: false },
+    inputs: {
+      image:
+        !!modes.IMAGE_TO_VIDEO ||
+        Object.values(modes).some((m) => m.references?.some((r) => r.type === 'image')),
+      video: Object.values(modes).some((m) => m.references?.some((r) => r.type === 'video')),
+    },
     available: model.enabled && providerReady(),
     modes: Object.fromEntries(
-      Object.entries(modes).map(([key, { endpoint, ...values }]) => [key, values]),
+      Object.entries(modes).map(([key, { endpoint, fixed, qualityField, ...values }]) => [
+        key,
+        {
+          ...values,
+          workflowId: endpoint,
+          documentationUrl: `https://open.higgsfield.ai/models/${endpoint}/api-reference`,
+          references: (values.references || []).map(({ apiField, array, ...ref }) => ref),
+        },
+      ]),
     ),
   }));
 }
+
+// Enrich the legacy models without changing Professional's supported options.
+for (const config of modelConfigs) {
+  for (const [name, caps] of Object.entries(config.modes)) {
+    caps.method = 'POST';
+    caps.references =
+      name === 'IMAGE_TO_VIDEO'
+        ? [
+            {
+              role: 'image',
+              label: 'Изображение',
+              type: 'image',
+              min: 1,
+              max: 1,
+              apiField: 'image_url',
+              mimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+              maxBytes: 10 * 1024 * 1024,
+            },
+          ]
+        : [];
+    caps.parameters = {};
+    caps.promptMin = 1;
+    caps.defaults = { duration: 5, quality: caps.qualities[0], aspectRatio: caps.aspectRatios[0] };
+  }
+}
+modelConfigs.push(...workflowModels);

@@ -76,6 +76,11 @@ app.get('/api/health', async (req, res) => {
   }
 });
 app.get('/api/models', (req, res) => res.json({ models: publicModels() }));
+app.get('/api/models/:id', (req, res) => {
+  const model = publicModels().find((item) => item.id === req.params.id);
+  if (!model) throw new AppError(404, 'Модель не найдена');
+  res.json({ model });
+});
 app.use('/api/auth', authRoutes);
 app.use('/api/generations', generationRoutes);
 app.use('/api/users', userRoutes);

@@ -132,12 +132,15 @@ test(
       },
     });
     row = await prisma.generation.findUnique({ where: { id: generationId } });
-    assert.equal(row.status, 'queued');
-    assert.equal(row.attempts, 1);
+    assert.equal(row.status, 'failed');
+    assert.ok(row.submissionAttemptedAt);
+    assert.equal(row.attempts, 0);
     assert.equal(row.quotaRefunded, false);
+    // The provider is a local mock. Explicitly reconcile its known non-acceptance
+    // before exercising the accepted receipt and refund paths below.
     row = await prisma.generation.update({
       where: { id: generationId },
-      data: { leaseToken: 'test-lease-2' },
+      data: { leaseToken: 'test-lease-2', status: 'queued', submissionAttemptedAt: null },
     });
     const requestId = randomUUID();
     await processGeneration(row, {

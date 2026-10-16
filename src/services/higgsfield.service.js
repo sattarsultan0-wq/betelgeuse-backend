@@ -5,12 +5,14 @@ import { requestMedia, validateMediaUrl } from './safe-http.service.js';
 import { storage } from './storage.service.js';
 import { r2 } from './r2.service.js';
 import { AppError } from '../middleware/errors.js';
+import { validateModelInput } from './model-validation.service.js';
 const base = 'https://api.higgsfield.ai';
 const responseSchema = z.object({
   request_id: z.string().uuid(),
   status: z.enum(['queued', 'in_progress', 'completed', 'failed', 'nsfw', 'canceled']),
   status_url: z.string().url().optional(),
   video: z.object({ url: z.string().url() }).optional(),
+  images: z.array(z.object({ url: z.string().url() })).optional(),
 });
 export class ProviderError extends Error {
   constructor(message, { retryable = false, refundSafe = false } = {}) {
@@ -33,6 +35,28 @@ export function validateStatusUrl(value, id) {
   return url.toString();
 }
 export function providerPayload(generation) {
+  if (!['kling', 'higgsfield'].includes(generation.model)) {
+    let caps;
+    try {
+      ({ caps } = validateModelInput(generation));
+    } catch (error) {
+      throw new ProviderError(error.message, { refundSafe: true });
+    }
+    const body = { ...caps.fixed, prompt: generation.prompt };
+    if (caps.durations.length) body.duration = generation.duration;
+    if (caps.qualities.length) body[caps.qualityField] = generation.quality;
+    if (caps.aspectRatios.length) body.aspect_ratio = generation.aspectRatio;
+    for (const [key, definition] of Object.entries(caps.parameters))
+      body[key] = generation.parameters?.[key] ?? definition.default;
+    for (const rule of caps.references) {
+      const inputs = (generation.providerReferences || []).filter((ref) => ref.role === rule.role);
+      if (inputs.length < rule.min || inputs.length > rule.max || inputs.some((ref) => !ref.url))
+        throw new ProviderError('Референсы не загружены', { refundSafe: true });
+      if (inputs.length)
+        body[rule.apiField] = rule.array ? inputs.map((ref) => ref.url) : inputs[0].url;
+    }
+    return { endpoint: caps.endpoint, body };
+  }
   if (!generation.prompt?.trim())
     throw new ProviderError('Промпт не настроен', { refundSafe: true });
   const config = modelConfigs.find((model) => model.id === generation.model && model.enabled);
@@ -65,9 +89,11 @@ export function providerPayload(generation) {
       throw new ProviderError('Kling 3.0 Standard принимает одно исходное фото', {
         refundSafe: true,
       });
-    if (!generation.providerImageUrl)
-      throw new ProviderError('Нет загруженного изображения', { refundSafe: true });
-    body.image_url = generation.providerImageUrl;
+    const imageUrl =
+      generation.providerImageUrl ||
+      generation.providerReferences?.find((ref) => ref.role === 'image')?.url;
+    if (!imageUrl) throw new ProviderError('Нет загруженного изображения', { refundSafe: true });
+    body.image_url = imageUrl;
   }
   return { endpoint: capabilities.endpoint, body };
 }
