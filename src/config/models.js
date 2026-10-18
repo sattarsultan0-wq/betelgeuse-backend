@@ -1,58 +1,7 @@
 import { providerReady } from './env.js';
-import { workflowModels } from './workflowModels.js';
-import { modelPricing, generationCreditCost } from './modelPricing.js';
-export { generationCreditCosts, generationCreditCost } from './modelPricing.js';
-export const modelConfigs = [
-  {
-    id: 'kling',
-    name: 'Kling 3.0 Standard',
-    subtitle: 'Standard · через Higgsfield API',
-    enabled: true,
-    modes: {
-      TEXT_TO_VIDEO: {
-        endpoint: 'kling-video/v3.0/std/text-to-video',
-        aspectRatios: ['16:9', '9:16', '1:1'],
-        durations: [5, 10],
-        qualities: ['standard'],
-      },
-      IMAGE_TO_VIDEO: {
-        endpoint: 'kling-video/v3.0/std/image-to-video',
-        aspectRatios: ['source'],
-        durations: [5, 10],
-        qualities: ['standard'],
-        maxPhotos: 1,
-      },
-    },
-  },
-  {
-    id: 'higgsfield',
-    name: 'Seedance 2.0',
-    subtitle: 'Seedance 2.0 · через Higgsfield API',
-    enabled: false,
-    modes: {
-      TEXT_TO_VIDEO: {
-        endpoint: 'bytedance/seedance-2.0/text-to-video',
-        aspectRatios: ['16:9', '9:16', '1:1'],
-        durations: [5, 10],
-        qualities: ['480p', '720p', '1080p'],
-      },
-      IMAGE_TO_VIDEO: {
-        endpoint: 'bytedance/seedance-2.0/image-to-video',
-        aspectRatios: ['source'],
-        durations: [5, 10],
-        qualities: ['480p', '720p', '1080p'],
-      },
-      REFERENCE_TO_VIDEO: {
-        endpoint: 'bytedance/seedance-2.0/reference-to-video',
-        aspectRatios: ['16:9', '9:16', '1:1'],
-        durations: [5, 10],
-        qualities: ['480p', '720p', '1080p'],
-        maxPhotos: 4,
-      },
-    },
-  },
-  { id: 'veo', name: 'Veo', subtitle: 'Скоро на платформе', enabled: false, modes: {} },
-];
+import { modelConfigs } from './modelCatalog.js';
+import { modelPriceSummary } from '../pricing/pricing-engine.js';
+export { modelConfigs } from './modelCatalog.js';
 export function publicModels() {
   return modelConfigs
     .filter((model) => model.enabled)
@@ -60,18 +9,13 @@ export function publicModels() {
       ...model,
       provider: 'higgsfield',
       generationType: model.generationType || 'Video',
-      pricingStatus: modelPricing[model.id]?.status || 'unconfigured',
+      pricing: modelPriceSummary({ ...model, modes }),
       supportedInputTypes: [
         'text',
         ...new Set(
           Object.values(modes).flatMap((caps) => (caps.references || []).map((ref) => ref.type)),
         ),
       ],
-      creditCosts: Object.fromEntries(
-        [...new Set(Object.values(modes).flatMap((mode) => mode.durations || []))].map(
-          (duration) => [duration, model.id === 'kling' ? generationCreditCost(duration) : null],
-        ),
-      ),
       inputs: {
         image:
           !!modes.IMAGE_TO_VIDEO ||
@@ -92,29 +36,3 @@ export function publicModels() {
       ),
     }));
 }
-
-// Enrich the legacy models without changing Professional's supported options.
-for (const config of modelConfigs) {
-  for (const [name, caps] of Object.entries(config.modes)) {
-    caps.method = 'POST';
-    caps.references =
-      name === 'IMAGE_TO_VIDEO'
-        ? [
-            {
-              role: 'image',
-              label: 'Изображение',
-              type: 'image',
-              min: 1,
-              max: 1,
-              apiField: 'image_url',
-              mimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
-              maxBytes: 10 * 1024 * 1024,
-            },
-          ]
-        : [];
-    caps.parameters = {};
-    caps.promptMin = 1;
-    caps.defaults = { duration: 5, quality: caps.qualities[0], aspectRatio: caps.aspectRatios[0] };
-  }
-}
-modelConfigs.push(...workflowModels);

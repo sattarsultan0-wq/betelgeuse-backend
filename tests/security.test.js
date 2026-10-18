@@ -1,3 +1,4 @@
+import { mockPricing } from '../test-support/mock-pricing.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
@@ -110,7 +111,8 @@ test('unsupported model and options fail before any paid request', () => {
     sourceImageId: 'image',
     providerImageUrl: 'https://images.higgs.ai/input.webp',
   };
-  assert.equal(validateGeneration(body), 1);
+  const restorePricing = mockPricing();
+  try { assert.equal(validateGeneration(body), 1); } finally { restorePricing(); }
   const mapped = providerPayload(body);
   assert.equal(mapped.body.image_url, body.providerImageUrl);
   assert.ok(!('aspect_ratio' in mapped.body));

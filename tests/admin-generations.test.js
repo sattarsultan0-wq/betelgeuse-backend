@@ -1,3 +1,4 @@
+import { mockPricing } from '../test-support/mock-pricing.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -18,6 +19,11 @@ const { processGeneration } = await import('../src/jobs/generation.worker.js');
 const { mp4Duration } = await import('../src/services/storage.service.js');
 const { r2 } = await import('../src/services/r2.service.js');
 const { mockR2 } = await import('../test-support/mock-r2.js');
+if (process.env.TEST_DATABASE_URL) {
+  const restorePricing = mockPricing();
+  after(restorePricing);
+}
+
 after(() => prisma.$disconnect());
 
 test('MP4 duration uses real movie metadata and rejects missing or truncated headers', async () => {
@@ -127,7 +133,7 @@ test(
             ),
             references,
           };
-          const { prompt, references: omitted, ...estimate } = body;
+          const { prompt, ...estimate } = body;
           const quote = (
             await agent
               .post('/api/generations/estimate')
@@ -136,7 +142,8 @@ test(
               .expect(200)
           ).body;
           assert.equal(quote.canGenerate, true);
-          assert.equal(quote.credits, 0);
+          assert.ok(quote.credits > 0);
+          assert.equal(quote.chargedCredits, 0);
           const key = randomUUID();
           let row;
           // Exercise the existing HTTP creation route for both image and video, then service for the other modes.
@@ -156,7 +163,7 @@ test(
           } else row = await createGeneration(userId, body, key);
           assert.equal(row.adminTest, true);
           assert.equal(row.quotaCost, 0);
-          assert.ok(row.costEstimate.amountUsd > 0);
+          assert.ok(Number(row.costEstimate.providerCostUSD) > 0);
           assert.equal((await createGeneration(userId, body, key)).id, row.id);
           for (let step = 0; step < 3; step++) {
             row = await prisma.generation.update({
@@ -297,7 +304,7 @@ test('provider auth, balance, model, validation, timeout and connection errors n
     const revoked = queuedRow();
     await processGeneration({ ...revoked }, { db: memoryDb(revoked, false), provider });
     assert.equal(revoked.status, 'failed');
-    assert.match(revoked.errorMessage, /администратору/);
+    assert.match(revoked.errorMessage, /ADMIN/);
     const expired = queuedRow();
     await processGeneration(
       { ...expired },

@@ -16,6 +16,7 @@ import uploadRoutes from './routes/upload.routes.js';
 import oauthCallbacks from './routes/oauth-callback.routes.js';
 import trendRoutes from './routes/trend.routes.js';
 import adminRoutes from './routes/admin.routes.js';
+import { publicSubscriptionPlans } from './pricing/subscription-discounts.js';
 export const app = express();
 app.disable('x-powered-by');
 if (env.TRUST_PROXY) app.set('trust proxy', env.TRUST_PROXY);
@@ -76,6 +77,7 @@ app.get('/api/health', async (req, res) => {
   }
 });
 app.get('/api/models', (req, res) => res.json({ models: publicModels() }));
+app.get('/api/pricing/plans', (req, res) => res.json({ plans: publicSubscriptionPlans() }));
 app.get('/api/models/:id', (req, res) => {
   const model = publicModels().find((item) => item.id === req.params.id);
   if (!model) throw new AppError(404, 'Модель не найдена');

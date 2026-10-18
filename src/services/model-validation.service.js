@@ -1,4 +1,4 @@
-import { modelConfigs } from '../config/models.js';
+import { modelConfigs } from '../config/modelCatalog.js';
 import { AppError } from '../middleware/errors.js';
 
 export function validateModelInput(body, { estimate = false } = {}) {

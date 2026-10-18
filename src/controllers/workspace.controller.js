@@ -1,22 +1,26 @@
 import { prisma } from '../config/prisma.js';
 import { AppError } from '../middleware/errors.js';
+import {
+  activeSubscriptionWhere,
+  selectPricingSubscription,
+} from '../pricing/subscription-discounts.js';
 
 export async function billing(req, res) {
+  const now = new Date();
   const user = await prisma.user.findUnique({
     where: { id: req.userId },
     select: {
       generationCredits: true,
       isAdmin: true,
       subscriptions: {
-        where: { status: 'active', OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+        where: activeSubscriptionWhere(now),
         include: { plan: true },
         orderBy: [{ expiresAt: 'desc' }, { id: 'asc' }],
-        take: 1,
       },
     },
   });
   if (!user) throw new AppError(401, 'Аккаунт не найден');
-  const subscription = user.subscriptions[0];
+  const subscription = selectPricingSubscription(user.subscriptions, now);
   res.json({
     generationCredits: user.generationCredits,
     isAdmin: user.isAdmin,

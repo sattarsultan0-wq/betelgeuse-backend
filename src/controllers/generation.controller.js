@@ -3,28 +3,9 @@ import * as service from '../services/generation.service.js';
 import { requestMedia } from '../services/safe-http.service.js';
 import { AppError } from '../middleware/errors.js';
 import { r2 } from '../services/r2.service.js';
-import { prisma } from '../config/prisma.js';
-import { validateModelInput } from '../services/model-validation.service.js';
-import { estimateCredits } from '../services/pricing.service.js';
-import { providerReady, r2Ready } from '../config/env.js';
+import { generationEstimate } from '../services/pricing.service.js';
 export async function estimate(req, res) {
-  const body = req.validatedBody;
-  validateModelInput(body, { estimate: true });
-  const user = await prisma.user.findUnique({
-    where: { id: req.userId },
-    select: { isAdmin: true, generationCredits: true },
-  });
-  if (!user) throw new AppError(401, 'Аккаунт не найден');
-  const quote = estimateCredits(body, user);
-  res.json({
-    ...quote,
-    providerAvailable: providerReady(),
-    storageAvailable: r2Ready(),
-    canGenerate: user.isAdmin && providerReady() && r2Ready(),
-    adminTest: user.isAdmin,
-    sufficientBalance:
-      quote.credits !== null && (user.isAdmin || user.generationCredits >= quote.credits),
-  });
+  res.json(await generationEstimate(req.validatedBody, req.userId));
 }
 export async function create(req, res) {
   const generation = await service.createGeneration(

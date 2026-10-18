@@ -3,6 +3,9 @@ import { rateLimit } from 'express-rate-limit';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { publicTrends } from '../config/trends.js';
+import { configuredTrend } from '../config/trends.js';
+import { generationEstimate } from '../services/pricing.service.js';
+import { z } from 'zod';
 import { presentGeneration } from '../services/generation.service.js';
 import {
   presignSchema,
@@ -29,6 +32,15 @@ router.use(
 router.post('/uploads/presign', validate(presignSchema), async (req, res) => {
   res.status(201).json({ uploads: await presignPhotos(req.userId, req.validatedBody) });
 });
+router.post(
+  '/estimate',
+  validate(z.object({ trendId: z.string().min(1).max(80) }).strict()),
+  async (req, res) => {
+    const trend = configuredTrend(req.validatedBody.trendId);
+    const { model, mode, duration, quality, aspectRatio } = trend;
+    res.json(await generationEstimate({ model, mode, duration, quality, aspectRatio }, req.userId));
+  },
+);
 router.post('/uploads/complete', validate(completeSchema), async (req, res) => {
   const image = await completePhoto(req.userId, req.validatedBody.uploadId);
   res.json({

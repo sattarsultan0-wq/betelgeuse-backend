@@ -1,58 +1,117 @@
-import { modelPricing } from '../config/modelPricing.js';
+import { prisma } from '../config/prisma.js';
+import { validateModelInput } from './model-validation.service.js';
+import { quotePrice, publicPrice } from '../pricing/pricing-engine.js';
 import { AppError } from '../middleware/errors.js';
+import { createHash } from 'node:crypto';
+import {
+  applySubscriptionDiscount,
+  pricingSubscription,
+} from '../pricing/subscription-discounts.js';
+import { providerReady, r2Ready } from '../config/env.js';
 
-export function estimateCredits(body, { isAdmin = false } = {}) {
-  const policy = modelPricing[body.model];
-  const values = { ...body, parameters: body.parameters || {} };
-  const rules = policy?.status === 'configured' ? policy.rules : [];
-  const matches = rules.filter(({ match }) =>
-    Object.entries(match).every(([key, expected]) => {
-      const actual = key.startsWith('parameters.') ? values.parameters[key.slice(11)] : values[key];
-      return actual === expected;
-    }),
-  );
-  // Public tariffs stay unconfigured; ADMIN testing does not depend on a retail tariff.
-  if (matches.length !== 1 || !Number.isSafeInteger(matches[0].credits) || matches[0].credits < 0)
-    return {
-      status: isAdmin ? 'admin_test' : 'unconfigured',
-      credits: isAdmin ? 0 : null,
-      baseCredits: null,
-    };
-  const baseCredits = matches[0].credits;
-  return { status: 'configured', credits: isAdmin ? 0 : baseCredits, baseCredits };
+export async function generationEstimate(body, userId) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isAdmin: true, generationCredits: true },
+  });
+  if (!user) throw new AppError(401, 'Аккаунт не найден');
+  const calculated = await priceGeneration(body, userId);
+  const quote = publicPrice(calculated);
+  const adminTest = calculated.status === 'AVAILABLE' ? calculated.adminTest : user.isAdmin;
+  const sufficientBalance =
+    quote.credits !== null && (adminTest || user.generationCredits >= quote.credits);
+  return {
+    ...quote,
+    providerAvailable: providerReady(),
+    storageAvailable: r2Ready(),
+    canGenerate: quote.status === 'AVAILABLE' && sufficientBalance && providerReady() && r2Ready(),
+    adminTest,
+    chargedCredits: quote.credits === null ? null : adminTest ? 0 : quote.credits,
+    sufficientBalance,
+  };
 }
 
-// Indicative analytics only, not an invoice or public credit tariff. Image rates:
-// HIGGSFIELD_API.md §4.3. Video list starting rates: https://open.higgsfield.ai/pricing.
-// Parameter/account discounts can change the actual provider charge.
-const referenceRates = {
-  'qwen-image-3': ['image', 0.035],
-  'soul-v2': ['image', 0.094],
-  'ideogram-4': ['image', 0.045],
-  'recraft-v4-1': ['image', 0.025],
-  'grok-image-2': ['image', 0.05],
-  kling: ['second', 0.084],
-  'kling-2-5-turbo': ['second', 0.042],
-  'wan-3': ['second', 0.05],
-  'seedance-2-5': ['second', 0.206],
-  'kling-o3': ['second', 0.084],
-  // Same family starting rate; actual Motion Control charge must be reconciled in Console.
-  'kling-3-motion': ['second', 0.084],
-};
-export function estimateProviderCost(body, referenceDuration) {
-  const [unit, unitRateUsd] = referenceRates[body.model];
-  const quantity = unit === 'image' ? 1 : body.duration || referenceDuration;
-  if (!Number.isFinite(quantity) || quantity <= 0)
-    throw new AppError(400, 'Не удалось определить длительность видео. Загрузите референс заново.');
+export function estimateCredits(body, user = {}, context = {}) {
+  const quote = publicPrice(quotePrice(body, context));
   return {
-    amountUsd: Number((unitRateUsd * quantity).toFixed(6)),
-    kind: 'estimate',
-    scope: 'Reference baseline only; parameters and account discounts may change the actual charge',
-    unitRateUsd,
-    quantity,
-    unit,
-    basis: 'indicative_reference_rate',
-    source: unit === 'image' ? 'HIGGSFIELD_API.md#4.3' : 'https://open.higgsfield.ai/pricing',
-    estimatedAt: new Date().toISOString(),
+    ...quote,
+    chargedCredits: quote.credits === null ? null : user.isAdmin ? 0 : quote.credits,
+    adminTest: user.isAdmin === true,
   };
+}
+
+// Duration comes exclusively from the server's inspected, owned upload.
+// Client duration metadata is never used for reference-video billing.
+export async function priceGeneration(body, userId, { db = prisma, ...context } = {}) {
+  let caps;
+  try {
+    ({ caps } = validateModelInput(body, { estimate: true }));
+  } catch {
+    return quotePrice(body, context);
+  }
+  const videoRule = caps.references.find((rule) => rule.type === 'video');
+  if (videoRule && !caps.durations.length) {
+    const reference = body.references?.find((ref) => ref.role === videoRule.role);
+    if (!reference) return quotePrice(body, context);
+    const stored = await db.storedImage.findFirst({ where: { id: reference.uploadId, userId } });
+    if (!stored) throw new AppError(404, 'Референс не найден');
+    if (!videoRule.mimeTypes.includes(stored.mimeType) || stored.size > videoRule.maxBytes)
+      throw new AppError(400, 'Формат или размер референса не поддерживается');
+    context.referenceDuration = stored.durationSeconds;
+  }
+  const base = quotePrice(body, context);
+  if (base.status !== 'AVAILABLE') return base;
+  const subscription = await pricingSubscription(db, userId);
+  const quote = applySubscriptionDiscount(base, subscription, context.policy);
+  if (quote.status !== 'AVAILABLE') return quote;
+  const account = await db.user.findUnique({ where: { id: userId }, select: { isAdmin: true } });
+  if (!account) throw new AppError(401, 'Аккаунт не найден');
+  // Confirmation is a comparison with a fresh server calculation, never a
+  // client-provided price. It binds the quote to its owner, parameters and plan.
+  const normalized = {
+    model: body.model,
+    mode: body.mode,
+    duration: body.duration ?? null,
+    quality: body.quality ?? null,
+    aspectRatio: body.aspectRatio ?? null,
+    parameters: Object.entries(caps.parameters)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, rule]) => [key, body.parameters?.[key] ?? rule.default]),
+    videoReferences: (body.references || []).filter((ref) =>
+      caps.references.some((rule) => rule.type === 'video' && rule.role === ref.role),
+    ),
+  };
+  const priceConfirmation = createHash('sha256')
+    .update(
+      JSON.stringify({
+        userId,
+        adminTest: account.isAdmin,
+        normalized,
+        price: publicPrice(quote),
+        subscription: subscription
+          ? [subscription.id, subscription.planId, subscription.expiresAt]
+          : null,
+      }),
+    )
+    .digest('hex');
+  return { ...quote, priceConfirmation, adminTest: account.isAdmin };
+}
+
+export function confirmPrice(quote, confirmation, { isAdmin = false } = {}) {
+  // Existing uncharged ADMIN clients stay compatible. Paid requests always
+  // require an explicitly accepted estimate, including after a plan change.
+  if ((!isAdmin || confirmation) && confirmation !== quote.priceConfirmation) {
+    const error = new AppError(
+      409,
+      'Цена изменилась. Проверьте стоимость и нажмите Generate ещё раз.',
+      'PRICE_CHANGED',
+    );
+    error.currentQuote = publicPrice(quote);
+    throw error;
+  }
+}
+
+export function requirePrice(quote) {
+  if (quote.status !== 'AVAILABLE') throw new AppError(400, 'Цена не указана', 'PRICE_UNAVAILABLE');
+  return quote;
 }

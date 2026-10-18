@@ -30,6 +30,10 @@ export const trendGenerationSchema = z
   .object({
     trendId: z.string().min(1).max(80),
     photoKeys: z.array(z.string().min(1).max(250)).min(1).max(4),
+    priceConfirmation: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
   })
   .strict();
 
@@ -176,6 +180,7 @@ export async function createTrendGeneration(
       quality: trend.quality,
       sourceImageId: ids[0],
       sourceImageIds: ids,
+      ...(body.priceConfirmation ? { priceConfirmation: body.priceConfirmation } : {}),
     },
     key,
   );

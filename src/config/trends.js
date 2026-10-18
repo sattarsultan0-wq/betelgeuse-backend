@@ -98,13 +98,20 @@ export function publicTrends() {
       mediaAspectRatio: value.mediaAspectRatio || null,
       minPhotos: value.minPhotos,
       maxPhotos: value.maxPhotos,
-      available: configured && providerReady() && r2Ready(),
+      available:
+        configured && estimateCredits(value).status === 'AVAILABLE' && providerReady() && r2Ready(),
       unavailableReason: !configured
         ? 'Этот тренд скоро станет доступен для генерации.'
         : !r2Ready() || !providerReady()
           ? 'Генерация временно недоступна.'
-          : null,
+          : estimateCredits(value).status !== 'AVAILABLE'
+            ? 'Цена не указана'
+            : null,
       quotaCost: estimateCredits(value).credits,
+      pricing: (() => {
+        const { status, credits, tariffVersion } = estimateCredits(value);
+        return { status, credits, tariffVersion };
+      })(),
     };
   });
 }

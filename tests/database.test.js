@@ -1,3 +1,4 @@
+import { mockPricing } from '../test-support/mock-pricing.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -16,6 +17,11 @@ const { r2 } = await import('../src/services/r2.service.js');
 const { mockR2 } = await import('../test-support/mock-r2.js');
 const ids = [],
   files = [];
+if (process.env.TEST_DATABASE_URL) {
+  const restorePricing = mockPricing();
+  after(restorePricing);
+}
+
 after(async () => {
   if (ids.length) await prisma.user.deleteMany({ where: { id: { in: ids } } });
   for (const file of files) {
@@ -76,7 +82,7 @@ test(
         .set('X-CSRF-Token', csrfA)
         .set('Idempotency-Key', randomUUID())
         .send(body)
-        .expect(403);
+        .expect(409);
       await prisma.user.update({
         where: { id: ids[0] },
         data: { isAdmin: true, generationCredits: 1 },

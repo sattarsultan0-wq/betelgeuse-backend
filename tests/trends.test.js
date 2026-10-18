@@ -1,3 +1,4 @@
+import { mockPricing } from '../test-support/mock-pricing.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -23,6 +24,11 @@ const { higgsfield, providerPayload, ProviderError } =
   await import('../src/services/higgsfield.service.js');
 const { processGeneration } = await import('../src/jobs/generation.worker.js');
 const ids = [];
+if (process.env.TEST_DATABASE_URL) {
+  const restorePricing = mockPricing();
+  after(restorePricing);
+}
+
 after(async () => {
   if (ids.length) await prisma.user.deleteMany({ where: { id: { in: ids } } });
   await prisma.$disconnect();
@@ -503,7 +509,7 @@ test(
         .set('X-CSRF-Token', token)
         .set('Idempotency-Key', randomUUID())
         .send({ trendId: 'litvin', photoKeys })
-        .expect(403);
+        .expect(409);
       await prisma.user.update({
         where: { id: userId },
         data: { isAdmin: true, generationCredits: 1 },

@@ -30,6 +30,7 @@ export function errorHandler(error, req, res, next) {
       code: error.code,
       message: error.message,
       ...(error.code === 'CSRF' && error.reason ? { reason: error.reason } : {}),
+      ...(error.code === 'PRICE_CHANGED' ? { currentQuote: error.currentQuote } : {}),
     });
   if (error.status === 400)
     return res.status(400).json({ code: 'BODY', message: 'Некорректное тело запроса' });

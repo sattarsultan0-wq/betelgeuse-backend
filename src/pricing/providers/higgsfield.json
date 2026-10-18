@@ -1,0 +1,544 @@
+{
+  "provider": "higgsfield",
+  "currency": "USD",
+  "version": "higgsfield-v1.1",
+  "models": {
+    "kling": {
+      "TEXT_TO_VIDEO": {
+        "workflow": "kling-video/v3.0/std/text-to-video",
+        "unit": "second",
+        "fixed": {
+          "sound": "off",
+          "cfg_scale": 0.5,
+          "multi_shots": false
+        },
+        "dimensions": [
+          "quality"
+        ],
+        "prices": {
+          "standard": null
+        }
+      },
+      "IMAGE_TO_VIDEO": {
+        "workflow": "kling-video/v3.0/std/image-to-video",
+        "unit": "second",
+        "fixed": {
+          "sound": "off",
+          "cfg_scale": 0.5,
+          "multi_shots": false
+        },
+        "dimensions": [
+          "quality"
+        ],
+        "prices": {
+          "standard": null
+        }
+      }
+    },
+    "qwen-image-3": {
+      "TEXT_TO_IMAGE": {
+        "workflow": "alibaba/qwen-image-3/text-to-image",
+        "unit": "generation",
+        "fixed": {
+          "prompt_extend": true,
+          "enable_thinking": true,
+          "prompt_extend_mode": "direct"
+        },
+        "dimensions": [
+          "quality"
+        ],
+        "prices": {
+          "1k": "0.04",
+          "2k": "0.075"
+        }
+      },
+      "IMAGE_TO_IMAGE": {
+        "workflow": "alibaba/qwen-image-3/edit",
+        "unit": "generation",
+        "fixed": {
+          "prompt_extend": true,
+          "enable_thinking": true,
+          "prompt_extend_mode": "direct"
+        },
+        "dimensions": [
+          "quality"
+        ],
+        "prices": {
+          "1k": "0.04",
+          "2k": "0.075"
+        }
+      }
+    },
+    "soul-v2": {
+      "TEXT_TO_IMAGE": {
+        "workflow": "higgsfield-ai/soul/v2/standard",
+        "unit": "generation",
+        "fixed": {
+          "batch_size": 1,
+          "enhance_prompt": true
+        },
+        "dimensions": [
+          "quality"
+        ],
+        "prices": {
+          "720p": "0.0032",
+          "1080p": "0.0057"
+        }
+      },
+      "IMAGE_TO_IMAGE": {
+        "workflow": "higgsfield-ai/soul/v2/image-to-image",
+        "unit": "generation",
+        "fixed": {
+          "batch_size": 1,
+          "enhance_prompt": true
+        },
+        "dimensions": [
+          "quality"
+        ],
+        "prices": {
+          "720p": "0.0032",
+          "1080p": "0.0057"
+        }
+      }
+    },
+    "ideogram-4": {
+      "TEXT_TO_IMAGE": {
+        "workflow": "ideogram/v4.0",
+        "unit": "generation",
+        "fixed": {},
+        "dimensions": [
+          "parameters.rendering_speed"
+        ],
+        "prices": {
+          "DEFAULT": "0.06",
+          "TURBO": "0.03",
+          "QUALITY": "0.10"
+        }
+      },
+      "IMAGE_TO_IMAGE": {
+        "workflow": "ideogram/v4.0",
+        "unit": "generation",
+        "fixed": {},
+        "dimensions": [
+          "parameters.rendering_speed"
+        ],
+        "prices": {
+          "DEFAULT": "0.06",
+          "TURBO": "0.03",
+          "QUALITY": "0.10"
+        }
+      }
+    },
+    "recraft-v4-1": {
+      "TEXT_TO_IMAGE": {
+        "workflow": "recraft/v4.1/text-to-image",
+        "unit": "generation",
+        "fixed": {
+          "output_format": "png"
+        },
+        "dimensions": [
+          "quality"
+        ],
+        "prices": {
+          "1k": null
+        }
+      }
+    },
+    "grok-image-2": {
+      "TEXT_TO_IMAGE": {
+        "workflow": "xai/grok-imagine-image-2.0",
+        "unit": "generation",
+        "fixed": {},
+        "dimensions": [
+          "quality",
+          "parameters.quality"
+        ],
+        "prices": {
+          "1k": {
+            "medium": "0.06",
+            "low": "0.04"
+          },
+          "2k": {
+            "medium": "0.08",
+            "low": "0.06"
+          }
+        }
+      },
+      "IMAGE_TO_IMAGE": {
+        "workflow": "xai/grok-imagine-image-2.0",
+        "unit": "generation",
+        "fixed": {},
+        "dimensions": [
+          "quality",
+          "parameters.quality"
+        ],
+        "prices": {
+          "1k": {
+            "medium": "0.08",
+            "low": "0.06"
+          },
+          "2k": {
+            "medium": "0.10",
+            "low": "0.08"
+          }
+        }
+      }
+    },
+    "kling-2-5-turbo": {
+      "TEXT_TO_VIDEO": {
+        "workflow": "kling-video/v2.5-turbo/pro/text-to-video",
+        "unit": "second",
+        "fixed": {
+          "cfg_scale": 0.5
+        },
+        "dimensions": [],
+        "prices": "0.0595"
+      },
+      "IMAGE_TO_VIDEO": {
+        "workflow": "kling-video/v2.5-turbo/pro/image-to-video",
+        "unit": "second",
+        "fixed": {
+          "cfg_scale": 0.5
+        },
+        "dimensions": [],
+        "prices": "0.0595"
+      }
+    },
+    "wan-3": {
+      "TEXT_TO_VIDEO": {
+        "workflow": "alibaba/wan-3.0/text-to-video",
+        "unit": "second",
+        "fixed": {},
+        "dimensions": [
+          "quality",
+          "parameters.generate_audio",
+          "parameters.enable_thinking"
+        ],
+        "prices": {
+          "1080p": {
+            "false": {
+              "false": null,
+              "true": null
+            },
+            "true": {
+              "false": null,
+              "true": null
+            }
+          },
+          "720p": {
+            "false": {
+              "false": null,
+              "true": null
+            },
+            "true": {
+              "false": null,
+              "true": null
+            }
+          },
+          "480p": {
+            "false": {
+              "false": null,
+              "true": null
+            },
+            "true": {
+              "false": null,
+              "true": null
+            }
+          }
+        }
+      },
+      "IMAGE_TO_VIDEO": {
+        "workflow": "alibaba/wan-3.0/image-to-video",
+        "unit": "second",
+        "fixed": {},
+        "dimensions": [
+          "quality",
+          "parameters.generate_audio",
+          "parameters.enable_thinking"
+        ],
+        "prices": {
+          "1080p": {
+            "false": {
+              "false": null,
+              "true": null
+            },
+            "true": {
+              "false": null,
+              "true": null
+            }
+          },
+          "720p": {
+            "false": {
+              "false": null,
+              "true": null
+            },
+            "true": {
+              "false": null,
+              "true": null
+            }
+          },
+          "480p": {
+            "false": {
+              "false": null,
+              "true": null
+            },
+            "true": {
+              "false": null,
+              "true": null
+            }
+          }
+        }
+      },
+      "FIRST_LAST_FRAME": {
+        "workflow": "alibaba/wan-3.0/image-to-video",
+        "unit": "second",
+        "fixed": {},
+        "dimensions": [
+          "quality",
+          "parameters.generate_audio",
+          "parameters.enable_thinking"
+        ],
+        "prices": {
+          "1080p": {
+            "false": {
+              "false": null,
+              "true": null
+            },
+            "true": {
+              "false": null,
+              "true": null
+            }
+          },
+          "720p": {
+            "false": {
+              "false": null,
+              "true": null
+            },
+            "true": {
+              "false": null,
+              "true": null
+            }
+          },
+          "480p": {
+            "false": {
+              "false": null,
+              "true": null
+            },
+            "true": {
+              "false": null,
+              "true": null
+            }
+          }
+        }
+      }
+    },
+    "seedance-2-5": {
+      "TEXT_TO_VIDEO": {
+        "workflow": "bytedance/seedance-2.5/text-to-video",
+        "unit": "second",
+        "fixed": {
+          "output_format": "mp4"
+        },
+        "dimensions": [
+          "quality",
+          "aspectRatio",
+          "parameters.generate_audio"
+        ],
+        "prices": {
+          "720p": {
+            "16:9": {
+              "false": "0.4622",
+              "true": "0.4722"
+            },
+            "4:3": {
+              "false": "0.4622",
+              "true": "0.4722"
+            },
+            "1:1": {
+              "false": "0.4622",
+              "true": "0.4722"
+            },
+            "3:4": {
+              "false": "0.4622",
+              "true": "0.4722"
+            },
+            "9:16": {
+              "false": "0.4622",
+              "true": "0.4722"
+            },
+            "21:9": {
+              "false": "0.4622",
+              "true": "0.4722"
+            }
+          },
+          "480p": {
+            "16:9": {
+              "false": "0.2056",
+              "true": "0.2156"
+            },
+            "4:3": {
+              "false": "0.2056",
+              "true": "0.2156"
+            },
+            "1:1": {
+              "false": "0.2056",
+              "true": "0.2156"
+            },
+            "3:4": {
+              "false": "0.2056",
+              "true": "0.2156"
+            },
+            "9:16": {
+              "false": "0.2056",
+              "true": "0.2156"
+            },
+            "21:9": {
+              "false": "0.2056",
+              "true": "0.2156"
+            }
+          },
+          "1080p": {
+            "16:9": {
+              "false": "1.1372",
+              "true": "1.1472"
+            },
+            "4:3": {
+              "false": "1.1372",
+              "true": "1.1472"
+            },
+            "1:1": {
+              "false": "1.1372",
+              "true": "1.1472"
+            },
+            "3:4": {
+              "false": "1.1372",
+              "true": "1.1472"
+            },
+            "9:16": {
+              "false": "1.1372",
+              "true": "1.1472"
+            },
+            "21:9": {
+              "false": "1.1372",
+              "true": "1.1472"
+            }
+          }
+        },
+        "billingReviewRequired": true
+      },
+      "IMAGE_TO_VIDEO": {
+        "workflow": "bytedance/seedance-2.5/image-to-video",
+        "unit": "second",
+        "fixed": {
+          "output_format": "mp4"
+        },
+        "dimensions": [
+          "quality",
+          "parameters.generate_audio"
+        ],
+        "prices": {
+          "720p": {
+            "false": null,
+            "true": null
+          },
+          "480p": {
+            "false": null,
+            "true": null
+          },
+          "1080p": {
+            "false": null,
+            "true": null
+          }
+        },
+        "billingReviewRequired": true
+      },
+      "FIRST_LAST_FRAME": {
+        "workflow": "bytedance/seedance-2.5/image-to-video",
+        "unit": "second",
+        "fixed": {
+          "output_format": "mp4"
+        },
+        "dimensions": [
+          "quality",
+          "parameters.generate_audio"
+        ],
+        "prices": {
+          "720p": {
+            "false": null,
+            "true": null
+          },
+          "480p": {
+            "false": null,
+            "true": null
+          },
+          "1080p": {
+            "false": null,
+            "true": null
+          }
+        },
+        "billingReviewRequired": true
+      }
+    },
+    "kling-o3": {
+      "FIRST_LAST_FRAME": {
+        "workflow": "kling-video/o3/first-last-frame",
+        "unit": "second",
+        "fixed": {
+          "multi_shots": false
+        },
+        "dimensions": [
+          "parameters.mode",
+          "parameters.sound"
+        ],
+        "prices": {
+          "std": {
+            "off": "0.084",
+            "on": "0.094"
+          },
+          "pro": {
+            "off": "0.098",
+            "on": "0.108"
+          },
+          "4k": {
+            "off": "0.112",
+            "on": "0.122"
+          }
+        }
+      },
+      "VIDEO_TO_VIDEO": {
+        "workflow": "kling-video/o3/video-edit",
+        "unit": "second",
+        "fixed": {},
+        "dimensions": [
+          "parameters.mode"
+        ],
+        "prices": {
+          "std": "0.084",
+          "pro": "0.098",
+          "4k": "0.112"
+        }
+      }
+    },
+    "kling-3-motion": {
+      "MOTION_CONTROL": {
+        "workflow": "kling-video/v3/motion-control/std",
+        "unit": "second",
+        "fixed": {},
+        "dimensions": [
+          "parameters.keep_original_sound",
+          "parameters.character_orientation"
+        ],
+        "prices": {
+          "yes": {
+            "video": "0.1071",
+            "image": "0.1071"
+          },
+          "no": {
+            "video": "0.1071",
+            "image": "0.1071"
+          }
+        }
+      }
+    }
+  }
+}

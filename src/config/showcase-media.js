@@ -13,7 +13,7 @@ export const showcaseMedia = [
   },
   {
     id: 'liquid',
-    title: 'Жидкая геометрия',
+    title: 'test',
     model: 'Авторский концепт',
     sourceVideo: '/videos/example4.mp4',
     src: 'https://pub-66fef0903f9846c3b025fdfbd4672b02.r2.dev/example4.mp4',
@@ -21,7 +21,7 @@ export const showcaseMedia = [
   },
   {
     id: 'landscape',
-    title: 'Неземная тишина',
+    title: 'test',
     model: 'Авторский концепт',
     sourceVideo: '/videos/example1.mp4',
     src: '/videos/optimized/example1.mp4',
@@ -29,7 +29,7 @@ export const showcaseMedia = [
   },
   {
     id: 'portal',
-    title: 'Другая реальность',
+    title: 'test',
     model: 'Авторский концепт',
     sourceVideo: '/videos/example2.mp4',
     src: '/videos/optimized/example2.mp4',
@@ -37,7 +37,7 @@ export const showcaseMedia = [
   },
   {
     id: 'waves',
-    title: 'Гравитация света',
+    title: 'test',
     model: 'Авторский концепт',
     sourceVideo: '/videos/example3.mp4',
     src: '/videos/optimized/example3.mp4',
@@ -45,7 +45,7 @@ export const showcaseMedia = [
   },
   {
     id: 'crystal',
-    title: 'Идеальная форма',
+    title: 'test',
     model: 'Авторский концепт',
     sourceVideo: '/videos/example5.mp4',
     src: '/videos/optimized/example5.mp4',

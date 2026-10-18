@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../config/prisma.js';
 import { env, providerReady, r2Ready } from '../config/env.js';
 import { validateModelInput } from './model-validation.service.js';
-import { estimateCredits, estimateProviderCost } from './pricing.service.js';
+import { priceGeneration, requirePrice, confirmPrice } from './pricing.service.js';
+import { quotePrice, publicPrice } from '../pricing/pricing-engine.js';
 import { AppError } from '../middleware/errors.js';
 import { r2 } from './r2.service.js';
 export const generationSchema = z
@@ -30,12 +31,16 @@ export const generationSchema = z
       .max(8)
       .optional(),
     sourceImageId: z.string().uuid().optional(),
+    priceConfirmation: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
   })
   .strict();
 export const estimateSchema = generationSchema.omit({
   prompt: true,
   sourceImageId: true,
-  references: true,
+  priceConfirmation: true,
 });
 export const listSchema = z
   .object({ page: z.coerce.number().int().min(1).max(10000).default(1) })
@@ -49,10 +54,8 @@ export function validateGeneration(body, user = {}) {
       body.sourceImageIds.length > (mode.maxPhotos || 1))
   )
     throw new AppError(400, 'Некорректные фотографии для выбранной модели');
-  const quote = estimateCredits(body, user);
-  if (!['configured', 'admin_test'].includes(quote.status))
-    throw new AppError(400, 'Стоимость генерации не настроена', 'PRICING_UNCONFIGURED');
-  return quote.credits;
+  const quote = requirePrice(quotePrice(body));
+  return user.isAdmin ? 0 : quote.credits;
 }
 export const publicGeneration = ({
   id,
@@ -75,6 +78,7 @@ export const publicGeneration = ({
   updatedAt,
   adminTest,
   costEstimate,
+  quotaCost,
 }) => ({
   id,
   model,
@@ -94,7 +98,8 @@ export const publicGeneration = ({
   createdAt,
   updatedAt,
   adminTest: adminTest === true,
-  costEstimate,
+  pricing: publicPrice(costEstimate),
+  chargedCredits: Number.isInteger(quotaCost) && quotaCost >= 0 ? quotaCost : null,
 });
 export async function presentGeneration(row) {
   const value = publicGeneration(row);
@@ -117,13 +122,13 @@ const canonical = (value) =>
         )
       : value;
 export async function createGeneration(userId, body, idempotencyKey) {
+  const { priceConfirmation, ...generationBody } = body;
+  body = generationBody;
   const account = await prisma.user.findUnique({
     where: { id: userId },
     select: { isAdmin: true },
   });
   if (!account) throw new AppError(401, 'Аккаунт не найден');
-  if (!account.isAdmin)
-    throw new AppError(403, 'Генерация доступна только администратору', 'ADMIN_REQUIRED');
   z.string().uuid().parse(idempotencyKey);
   validateModelInput(body);
   const payloadHash = createHash('sha256')
@@ -139,7 +144,7 @@ export async function createGeneration(userId, body, idempotencyKey) {
       throw new AppError(409, 'Идентификатор запроса уже использован с другими параметрами');
     return existing;
   }
-  validateGeneration(body, account);
+  requirePrice(await priceGeneration(body, userId));
   if (!providerReady()) throw new AppError(503, 'Higgsfield API ещё не подключён');
   if (!r2Ready())
     throw new AppError(503, 'Настройте R2 для сохранения результатов', 'STORAGE_UNAVAILABLE');
@@ -152,17 +157,25 @@ export async function createGeneration(userId, body, idempotencyKey) {
       });
       if (!locked.count) throw new AppError(401, 'Аккаунт не найден');
       const user = await tx.user.findUnique({ where: { id: userId }, select: { isAdmin: true } });
-      if (!user.isAdmin)
-        throw new AppError(403, 'Генерация доступна только администратору', 'ADMIN_REQUIRED');
-      const requestedCost = validateGeneration(body, user);
-      const quotaCost = user.isAdmin ? 0 : requestedCost;
+      // A second concurrent request with the same key returns the frozen job,
+      // before checking today's tariff or balance again.
+      const repeated = await tx.generation.findUnique({
+        where: { userId_idempotencyKey: { userId, idempotencyKey } },
+      });
+      if (repeated) {
+        if (!samePayload(repeated))
+          throw new AppError(409, 'Конфликт параметров повторного запроса');
+        return repeated;
+      }
+      const quote = requirePrice(await priceGeneration(body, userId, { db: tx }));
+      confirmPrice(quote, priceConfirmation, user);
+      const quotaCost = user.isAdmin ? 0 : quote.credits;
       if (quotaCost) {
         const debit = await tx.user.updateMany({
           where: { id: userId, generationCredits: { gte: quotaCost } },
           data: { generationCredits: { decrement: quotaCost } },
         });
-        if (!debit.count)
-          throw new AppError(402, 'Недостаточно квоты. Доступ выдаётся администратором.');
+        if (!debit.count) throw new AppError(402, 'Недостаточно кредитов.', 'INSUFFICIENT_CREDITS');
       }
       const active = await tx.generation.count({
         where: { userId, status: { in: ['queued', 'processing'] } },
@@ -175,7 +188,6 @@ export async function createGeneration(userId, body, idempotencyKey) {
         if (!image.mimeType.startsWith('image/')) throw new AppError(400, 'Требуется изображение');
       }
       const { model, caps } = validateModelInput(body);
-      let referenceDuration;
       if (body.references?.length) {
         const inputs = await tx.storedImage.findMany({
           where: { id: { in: body.references.map((ref) => ref.uploadId) }, userId },
@@ -186,7 +198,6 @@ export async function createGeneration(userId, body, idempotencyKey) {
           if (!stored) throw new AppError(404, 'Референс не найден');
           if (!rule.mimeTypes.includes(stored.mimeType) || stored.size > rule.maxBytes)
             throw new AppError(400, 'Формат или размер референса не поддерживается');
-          if (rule.type === 'video') referenceDuration = stored.durationSeconds;
         }
       }
       if (body.trendId) {
@@ -206,11 +217,10 @@ export async function createGeneration(userId, body, idempotencyKey) {
           idempotencyKey,
           payloadHash,
           quotaCost,
-          adminTest: true,
+          adminTest: user.isAdmin,
           costEstimate: {
-            ...estimateProviderCost(body, referenceDuration),
-            baseCredits: estimateCredits(body).baseCredits,
-            chargedCredits: 0,
+            ...quote,
+            chargedCredits: quotaCost,
           },
           sourceImageUrl: body.sourceImageId ? `/api/uploads/${body.sourceImageId}` : null,
         },

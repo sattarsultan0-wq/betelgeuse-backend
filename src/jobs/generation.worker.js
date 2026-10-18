@@ -73,8 +73,15 @@ export async function processGeneration(
         where: { id: row.userId },
         select: { isAdmin: true },
       });
-      if (!user?.isAdmin)
-        throw new ProviderError('Генерация доступна только администратору', { refundSafe: true });
+      if (
+        !user ||
+        (!user.isAdmin &&
+          (row.adminTest ||
+            !row.costEstimate?.priceConfirmation ||
+            row.quotaCost <= 0 ||
+            row.quotaCost !== row.costEstimate.credits))
+      )
+        throw new ProviderError('Аккаунт или доступ ADMIN недоступен', { refundSafe: true });
     }
     if (row.references?.length && !row.providerRequestId) {
       const images = await db.storedImage.findMany({

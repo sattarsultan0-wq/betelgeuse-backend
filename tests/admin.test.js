@@ -1,3 +1,4 @@
+import { mockPricing } from '../test-support/mock-pricing.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -15,6 +16,11 @@ const { processGeneration } = await import('../src/jobs/generation.worker.js');
 const ids = [];
 const { r2 } = await import('../src/services/r2.service.js');
 const { mockR2 } = await import('../test-support/mock-r2.js');
+if (process.env.TEST_DATABASE_URL) {
+  const restorePricing = mockPricing();
+  after(restorePricing);
+}
+
 after(async () => {
   if (ids.length) await prisma.user.deleteMany({ where: { id: { in: ids } } });
   await prisma.$disconnect();
@@ -67,8 +73,8 @@ test(
       };
       await prisma.user.update({ where: { id: userId }, data: { generationCredits: 50 } });
       await assert.rejects(createGeneration(userId, body, randomUUID()), {
-        status: 403,
-        code: 'ADMIN_REQUIRED',
+        status: 409,
+        code: 'PRICE_CHANGED',
       });
       await prisma.user.update({ where: { id: userId }, data: { generationCredits: 0 } });
       await prisma.user.update({ where: { id: userId }, data: { isAdmin: true } });
@@ -84,7 +90,7 @@ test(
       assert.equal(first.id, repeat.id);
       assert.equal(first.quotaCost, 0);
       assert.equal(first.adminTest, true);
-      assert.equal(first.costEstimate.amountUsd, 0.42);
+      assert.equal(first.costEstimate.providerCostUSD, '0.005');
       assert.equal((await prisma.user.findUnique({ where: { id: userId } })).generationCredits, 0);
       const receipt = randomUUID();
       const row = await prisma.generation.update({
@@ -109,8 +115,11 @@ test(
       await prisma.user.update({ where: { id: userId }, data: { isAdmin: false } });
       await agent.get('/api/admin/status').expect(403);
       assert.equal((await agent.get('/api/auth/me').expect(200)).body.user.isAdmin, false);
-      await assert.rejects(createGeneration(userId, body, randomUUID()), { status: 403 });
-      await assert.rejects(createGeneration(userId, body, key), { status: 403 });
+      await assert.rejects(createGeneration(userId, body, randomUUID()), {
+        status: 409,
+        code: 'PRICE_CHANGED',
+      });
+      assert.equal((await createGeneration(userId, body, key)).id, first.id);
     } finally {
       restoreR2();
       Object.assign(env, originalEnv);

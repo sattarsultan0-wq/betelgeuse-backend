@@ -9,7 +9,10 @@ if (process.env.TEST_DATABASE_URL) process.env.DATABASE_URL = process.env.TEST_D
 process.env.DATABASE_URL ||= 'postgresql://test:test@127.0.0.1:5432/test';
 process.env.HIGGSFIELD_ENABLED = 'false';
 const { modelConfigs, publicModels } = await import('../src/config/models.js');
-const { modelPricing } = await import('../src/config/modelPricing.js');
+const { higgsfieldPricing } = await import('../src/pricing/pricing-engine.js');
+const { setModelTestPrice, mockPricing } = await import('../test-support/mock-pricing.js');
+const restorePricing = mockPricing(null);
+after(restorePricing);
 const { validateModelInput } = await import('../src/services/model-validation.service.js');
 const { estimateCredits } = await import('../src/services/pricing.service.js');
 const { generationSchema } = await import('../src/services/generation.service.js');
@@ -155,7 +158,7 @@ test('all eleven requested model families expose verified workflows with valid s
       assert.equal(endpoint, publicCaps.workflowId);
       assert.equal(payload.prompt, body.prompt);
       assert.equal('duration' in payload, caps.durations.length > 0);
-      if (model.id !== 'kling') assert.equal(estimateCredits(body).status, 'unconfigured');
+      assert.equal(estimateCredits(body).status, 'PRICE_UNAVAILABLE');
     }
   }
   await request(app).get('/api/models/kling-o3').expect(200);
@@ -199,36 +202,14 @@ test('unsupported fields, parameters, references and client prices fail before d
   assert.ok(!('duration' in mapped.body));
 });
 
-test('pricing requires a unique configured rule, includes parameters and preserves admin policy', () => {
-  const original = modelPricing['grok-image-2'];
-  try {
-    modelPricing['grok-image-2'] = {
-      status: 'configured',
-      rules: [
-        {
-          match: { mode: 'TEXT_TO_IMAGE', quality: '1k', 'parameters.quality': 'low' },
-          credits: 3,
-        },
-      ],
-    };
-    const body = {
-      model: 'grok-image-2',
-      mode: 'TEXT_TO_IMAGE',
-      quality: '1k',
-      parameters: { quality: 'low' },
-    };
-    assert.equal(estimateCredits(body).credits, 3);
-    assert.equal(estimateCredits(body, { isAdmin: true }).credits, 0);
-    assert.equal(
-      estimateCredits({ ...body, parameters: { quality: 'medium' } }).status,
-      'unconfigured',
-    );
-    modelPricing['grok-image-2'].rules.push(modelPricing['grok-image-2'].rules[0]);
-    assert.equal(estimateCredits(body).status, 'unconfigured');
-    assert.equal(estimateCredits({ model: 'soul-v2' }, { isAdmin: true }).status, 'admin_test');
-  } finally {
-    modelPricing['grok-image-2'] = original;
-  }
+test('unconfigured pricing never grants ADMIN a free generation bypass', () => {
+  const body = input(
+    'soul-v2',
+    'TEXT_TO_IMAGE',
+    modelConfigs.find((m) => m.id === 'soul-v2').modes.TEXT_TO_IMAGE,
+  );
+  assert.equal(estimateCredits(body).status, 'PRICE_UNAVAILABLE');
+  assert.equal(estimateCredits(body, { isAdmin: true }).credits, null);
 });
 
 test('image result normalization and submission failures never trigger paid retries or duplicate refunds', async () => {
@@ -340,7 +321,7 @@ test(
   'PostgreSQL: estimates, new references, ownership, idempotency, insufficient funds and image completion',
   { skip: !process.env.TEST_DATABASE_URL },
   async () => {
-    const oldPricing = modelPricing['qwen-image-3'];
+    const oldPricing = structuredClone(higgsfieldPricing.models['qwen-image-3']);
     const restoreR2 = mockR2(env, r2);
     const originalEnabled = env.HIGGSFIELD_ENABLED;
     const originalKey = env.HIGGSFIELD_API_KEY_ID,
@@ -372,24 +353,24 @@ test(
       const post = (path, data) => agent.post(path).set('X-CSRF-Token', csrf).send(data);
       assert.equal(
         (await post('/api/generations/estimate', estimate).expect(200)).body.status,
-        'unconfigured',
+        'PRICE_UNAVAILABLE',
       );
-      modelPricing['qwen-image-3'] = {
-        status: 'configured',
-        rules: [{ match: { mode: body.mode, quality: body.quality }, credits: 3 }],
-      };
+      setModelTestPrice('qwen-image-3', '0.02');
       assert.equal(
         (await post('/api/generations/estimate', estimate).expect(200)).body.sufficientBalance,
         false,
       );
       await prisma.user.update({ where: { id: userIds[0] }, data: { generationCredits: 3 } });
-      // A funded ordinary account still cannot start paid work.
+      env.HIGGSFIELD_ENABLED = true;
+      env.HIGGSFIELD_API_KEY_ID = 'fixture';
+      env.HIGGSFIELD_API_KEY_SECRET = 'fixture';
+      // A paid request must confirm its server estimate before it can debit.
       await agent
         .post('/api/generations')
         .set('X-CSRF-Token', csrf)
         .set('Idempotency-Key', randomUUID())
         .send(body)
-        .expect(403);
+        .expect(409);
       await prisma.user.update({ where: { id: userIds[0] }, data: { isAdmin: true } });
       const image = await prisma.storedImage.create({
         data: {
@@ -431,7 +412,7 @@ test(
         3,
       );
       // A tariff change cannot turn a retry of an accepted request into a second debit.
-      modelPricing['qwen-image-3'] = { status: 'unconfigured', rules: [] };
+      setModelTestPrice('qwen-image-3', null);
       await agent
         .post('/api/generations')
         .set('X-CSRF-Token', csrf)
@@ -459,15 +440,15 @@ test(
       assert.equal(result.generationType, 'Image');
       assert.equal(result.resultImageUrls.length, 1);
       await prisma.user.update({ where: { id: userIds[0] }, data: { isAdmin: true } });
-      modelPricing['qwen-image-3'] = {
-        status: 'configured',
-        rules: [{ match: { mode: body.mode, quality: body.quality }, credits: 3 }],
-      };
-      assert.equal((await post('/api/generations/estimate', estimate).expect(200)).body.credits, 0);
+      setModelTestPrice('qwen-image-3', '0.02');
+      assert.equal(
+        (await post('/api/generations/estimate', estimate).expect(200)).body.chargedCredits,
+        0,
+      );
     } finally {
       restoreR2();
       await prisma.user.deleteMany({ where: { id: { in: userIds } } });
-      modelPricing['qwen-image-3'] = oldPricing;
+      higgsfieldPricing.models['qwen-image-3'] = oldPricing;
       env.HIGGSFIELD_ENABLED = originalEnabled;
       env.HIGGSFIELD_API_KEY_ID = originalKey;
       env.HIGGSFIELD_API_KEY_SECRET = originalSecret;
